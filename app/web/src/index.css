@@ -132,6 +132,7 @@
     border: 1.5px solid var(--rule);
     border-radius: 999px;
     padding: 0.55em 1.35em;
+    min-height: 44px;
     font-family: 'Noto Sans TC', system-ui, sans-serif;
     font-weight: 500;
     font-size: 0.95rem;
@@ -185,6 +186,7 @@
   .kg-pill-sm {
     padding: 0.4em 1em;
     font-size: 0.82rem;
+    min-height: 40px;
   }
   .kg-pill:disabled {
     opacity: 0.45;
@@ -388,6 +390,278 @@
   }
   .kg-progress-ind {
     animation: kg-slide 1.05s ease-in-out infinite;
+  }
+
+  /* 編輯頁：跟著鍵盤的儲存列 */
+  .kg-savebar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    border-top: 2px solid var(--rule);
+    background: color-mix(in srgb, var(--paper) 92%, transparent);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+    padding: 10px 16px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+  }
+
+  .kg-seg {
+    display: inline-flex;
+    border: 1.5px solid var(--rule);
+    border-radius: 999px;
+    padding: 3px;
+    background: #fff;
+    gap: 2px;
+  }
+  .kg-seg button {
+    min-height: 40px;
+    min-width: 4.5rem;
+    padding: 0 14px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    cursor: pointer;
+  }
+  .kg-seg button[aria-pressed='true'],
+  .kg-seg button[aria-selected='true'] {
+    background: var(--ink);
+    color: var(--paper);
+  }
+
+  .kg-acc-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 48px;
+    padding: 10px 16px;
+    text-align: left;
+    background: #f6efe4;
+    border: 0;
+    cursor: pointer;
+    color: var(--ink);
+  }
+  .kg-acc-head:hover {
+    background: var(--cyan-soft);
+  }
+
+  .kg-fill-preview {
+    display: block;
+    width: 100%;
+    text-align: left;
+    min-height: 48px;
+    padding: 12px 14px;
+    border: 1.5px dashed var(--rule);
+    border-radius: 12px;
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+    font-size: 0.95rem;
+    line-height: 1.5;
+  }
+  .kg-fill-preview-empty {
+    color: var(--ink-soft);
+  }
+
+  .kg-sheet {
+    position: fixed;
+    inset: 0;
+    z-index: 70;
+    background: var(--paper);
+    display: flex;
+    flex-direction: column;
+  }
+  .kg-sheet-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 56px;
+    padding: 8px 16px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    border-bottom: 1.5px solid var(--rule);
+    background: var(--paper);
+  }
+  .kg-sheet-body {
+    flex: 1;
+    overflow: auto;
+    padding: 16px;
+    padding-bottom: max(24px, env(safe-area-inset-bottom));
+  }
+  .kg-sheet-body .kg-textarea {
+    min-height: 46vh;
+    font-size: 1.05rem;
+  }
+
+  .kg-drop {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    border: 1.5px dashed var(--rule);
+    border-radius: 14px;
+    background: #fff;
+    cursor: pointer;
+    min-height: 88px;
+    width: 100%;
+  }
+  .kg-drop-sq {
+    width: 96px;
+    height: 96px;
+    min-height: 96px;
+    max-height: 96px;
+    flex-shrink: 0;
+  }
+  .kg-drop-sm {
+    height: 64px;
+    min-height: 64px;
+    max-height: 64px;
+  }
+  .kg-drop-sq.kg-drop-sm {
+    width: 64px;
+    height: 64px;
+    min-height: 64px;
+    max-height: 64px;
+  }
+  .kg-drop img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    object-position: center;
+  }
+
+  /* 有底欄的表單：欄位不被固定儲存列蓋住；聚焦時也不用 JS scrollIntoView（會打斷 IME） */
+  .kg-form-page {
+    padding-bottom: calc(8.5rem + env(safe-area-inset-bottom, 0px));
+  }
+  .kg-form-page input,
+  .kg-form-page textarea,
+  .kg-form-page [class*='kg-drop'] {
+    scroll-margin-bottom: calc(6.5rem + env(safe-area-inset-bottom, 0px));
+    scroll-margin-top: 5.5rem;
+  }
+
+  .kg-linkchip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    max-width: 100%;
+    min-height: 40px;
+    padding: 0 12px 0 8px;
+    border-radius: 999px;
+    border: 2px solid var(--rule);
+    background: #fff;
+    color: var(--ink);
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1;
+    text-decoration: none;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  }
+  .kg-linkchip:hover {
+    border-color: var(--ochre);
+    background: var(--cyan-soft);
+    color: var(--ochre-deep);
+  }
+  .kg-linkchip-ico {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 20px;
+    height: 20px;
+    color: var(--cyan-deep);
+    flex-shrink: 0;
+  }
+  .kg-linkchip-label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 10em;
+  }
+  .kg-linkchip-more {
+    color: var(--ink-soft);
+    font-family: 'JetBrains Mono', ui-monospace, monospace;
+    font-size: 11px;
+    padding: 0 10px;
+    pointer-events: none;
+  }
+
+  .kg-seg-grow {
+    display: flex;
+    width: 100%;
+  }
+  .kg-seg-grow button {
+    flex: 1;
+    min-width: 0;
+    padding-left: 6px;
+    padding-right: 6px;
+  }
+
+  .kg-iconbtn {
+    width: 44px;
+    height: 44px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border: 0;
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 1.25rem;
+    line-height: 1;
+    border-radius: 999px;
+    cursor: pointer;
+  }
+  .kg-iconbtn:hover {
+    background: var(--cyan-soft);
+    color: var(--ink);
+  }
+
+  .kg-menu {
+    position: absolute;
+    right: 0;
+    top: calc(100% - 4px);
+    z-index: 30;
+    min-width: 11rem;
+    background: #fff;
+    border: 1.5px solid var(--rule);
+    border-radius: 12px;
+    padding: 4px;
+    box-shadow: 0 8px 24px rgba(51, 38, 30, 0.12);
+  }
+  .kg-menu-item {
+    display: block;
+    width: 100%;
+    text-align: left;
+    min-height: 44px;
+    padding: 0 12px;
+    border: 0;
+    background: transparent;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    font-weight: 700;
+    cursor: pointer;
+    color: var(--ink);
+  }
+  .kg-menu-item:hover {
+    background: var(--cyan-soft);
+  }
+  .kg-menu-item:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+
+  .kg-field {
+    padding: 12px 0;
+    border-bottom: 1px dashed var(--rule);
+  }
+  .kg-field:last-child {
+    border-bottom: 0;
+    padding-bottom: 0;
   }
 
   /* 換頁頂部進度條 */

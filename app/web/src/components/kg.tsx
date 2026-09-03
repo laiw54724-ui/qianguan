@@ -1,4 +1,4 @@
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type FocusEvent, type FormEvent, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
 import { href } from '../lib/nav';
 import { getPendingPath, installClickGuard, resolveLeave, subscribeLeaveGuard } from '../lib/dirty';
 
@@ -276,27 +276,12 @@ export function Marquee({ items }: { items: string[] }) {
   );
 }
 
-// ---------- Turnstile 本機開發佔位（沒設 VITE_TURNSTILE_SITEKEY 時用；後端在沒設 TURNSTILE_SECRET 時也會放行） ----------
-function TurnstileMock({ checked, onChange }: { checked: boolean; onChange: (v: boolean) => void }) {
-  return (
-    <label className="kg-card-flat flex items-center gap-3 px-4 py-3 cursor-pointer select-none">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="w-5 h-5 accent-[#9e4b2c]"
-      />
-      <span className="text-sm font-bold">我確認我是真人</span>
-      <span className="ml-auto font-mono2 text-[10px] text-[#6f6156]">TURNSTILE（本機開發佔位）</span>
-    </label>
-  );
-}
-
 // ---------- Turnstile 正式元件 ----------
 // 規格 §6.7：三處掛載（建立企劃／加入企劃／發起牽線）。VITE_TURNSTILE_SITEKEY 有設定時載入
-// 真正的 Cloudflare Widget 並把 cf-turnstile-response token 交給呼叫端；沒設定（本機開發）
-// 時退回 TurnstileMock 的 checkbox——注意這個 fallback 只在後端也沒設 TURNSTILE_SECRET 時才會
-// 真的放行，兩邊必須同步，見《後端串接文件》第二節。
+// 真正的 Cloudflare Widget 並把 cf-turnstile-response token 交給呼叫端；沒設定（本機開發）時
+// 不渲染元件，直接以 'dev-bypass' 當 token——這個 fallback 只在後端也沒設 TURNSTILE_SECRET 時
+// 才會真的放行，兩邊必須同步，見《後端串接文件》第二節。呼叫端可用 TURNSTILE_REQUIRED 判斷
+// 目前是否真的需要使用者完成驗證（本機開發沒設 sitekey 時免驗）。
 declare global {
   interface Window {
     turnstile?: {
@@ -326,12 +311,17 @@ function loadTurnstileScript(): Promise<void> {
   return turnstileScriptPromise;
 }
 
+export const TURNSTILE_REQUIRED = Boolean(TURNSTILE_SITEKEY);
+
 export function TurnstileWidget({ token, onChange }: { token: string; onChange: (v: string) => void }) {
   const ref = useRef<HTMLDivElement>(null);
   const widgetId = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!TURNSTILE_SITEKEY) return;
+    if (!TURNSTILE_SITEKEY) {
+      if (!token) onChange('dev-bypass');
+      return;
+    }
     let cancelled = false;
     loadTurnstileScript()
       .then(() => {
@@ -351,9 +341,7 @@ export function TurnstileWidget({ token, onChange }: { token: string; onChange: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (!TURNSTILE_SITEKEY) {
-    return <TurnstileMock checked={!!token} onChange={(v) => onChange(v ? 'dev-bypass' : '')} />;
-  }
+  if (!TURNSTILE_SITEKEY) return null;
   return <div ref={ref} />;
 }
 
@@ -428,6 +416,130 @@ export function ErrorBox({ children }: { children: ReactNode }) {
   );
 }
 
+/** IME-safe field: never feed composing text to React, never let React 19
+ *  rewrite `defaultValue` mid-stroke (that was eating 注音 on create/join). */
+function isComposingEvent(e: { nativeEvent: Event }) {
+  const ne = e.nativeEvent as InputEvent & { isComposing?: boolean; keyCode?: number };
+  return !!(ne.isComposing || ne.keyCode === 229);
+}
+
+function useImeBind<T extends HTMLInputElement | HTMLTextAreaElement>(
+  value: string,
+  onChange: (v: string) => void,
+) {
+  const ref = useRef<T>(null);
+  const composing = useRef(false);
+  const sent = useRef(value);
+  const initial = useRef(value);
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el || composing.current) return;
+    if (value === sent.current) return;
+    sent.current = value;
+    if (el.value !== value) el.value = value;
+  }, [value]);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const start = () => {
+      composing.current = true;
+    };
+    const end = () => {
+      composing.current = false;
+      const v = el.value;
+      sent.current = v;
+      onChangeRef.current(v);
+    };
+    el.addEventListener('compositionstart', start);
+    el.addEventListener('compositionend', end);
+    return () => {
+      el.removeEventListener('compositionstart', start);
+      el.removeEventListener('compositionend', end);
+    };
+  }, []);
+
+  const emit = (el: T) => {
+    if (composing.current) return;
+    const v = el.value;
+    if (v === sent.current) return;
+    sent.current = v;
+    onChangeRef.current(v);
+  };
+
+  return {
+    ref,
+    initial: initial.current,
+    onInput: (e: FormEvent<T>) => {
+      if (isComposingEvent(e) || composing.current) return;
+      emit(e.currentTarget);
+    },
+    onBlur: (e: FocusEvent<T>) => {
+      composing.current = false;
+      emit(e.currentTarget);
+    },
+  };
+}
+
+export function ImeInput({
+  value,
+  onChange,
+  onBlur,
+  onInput,
+  ...rest
+}: Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange'> & {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const ime = useImeBind<HTMLInputElement>(value, onChange);
+  return (
+    <input
+      {...rest}
+      ref={ime.ref}
+      defaultValue={ime.initial}
+      onInput={(e) => {
+        ime.onInput(e);
+        onInput?.(e);
+      }}
+      onBlur={(e) => {
+        ime.onBlur(e);
+        onBlur?.(e);
+      }}
+    />
+  );
+}
+
+export function ImeTextarea({
+  value,
+  onChange,
+  onBlur,
+  onInput,
+  ...rest
+}: Omit<TextareaHTMLAttributes<HTMLTextAreaElement>, 'value' | 'onChange'> & {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const ime = useImeBind<HTMLTextAreaElement>(value, onChange);
+  return (
+    <textarea
+      {...rest}
+      ref={ime.ref}
+      defaultValue={ime.initial}
+      onInput={(e) => {
+        ime.onInput(e);
+        onInput?.(e);
+      }}
+      onBlur={(e) => {
+        ime.onBlur(e);
+        onBlur?.(e);
+      }}
+    />
+  );
+}
+
 // ---------- 權杖驗證閘門（貼上權杖以繼續） ----------
 export function TokenGate({
   title,
@@ -446,20 +558,56 @@ export function TokenGate({
   busy: boolean;
   error: string | null;
 }) {
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const t = (await navigator.clipboard.readText()).trim();
+        if (cancelled || token) return;
+        if (/^(chr_|own_)/i.test(t)) setToken(t);
+      } catch {
+        /* 沒權限就讓人自己貼 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const pasteFromClipboard = async () => {
+    try {
+      const t = (await navigator.clipboard.readText()).trim();
+      if (t) setToken(t);
+    } catch {
+      /* ignore */
+    }
+  };
+
   return (
     <div className="mx-auto max-w-md kg-card p-6 sm:p-8 kg-rise">
       <h1 className="font-huninn text-2xl mb-2">{title}</h1>
       <p className="text-sm text-[#6f6156] mb-5 leading-relaxed">{hint}</p>
       <label htmlFor="fld-kg-1" className="kg-label">
-        權杖 <span className="req">*</span>
+        編輯碼 <span className="req">*</span>
       </label>
       <input
-id="fld-kg-1"         className="kg-input font-mono2"
+        id="fld-kg-1"
+        className="kg-input font-mono2"
         value={token}
         onChange={(e) => setToken(e.target.value)}
-        placeholder="chr_… 或 own_…"
+        placeholder="貼上主辦給你的那串碼"
         autoComplete="off"
+        autoCapitalize="none"
+        autoCorrect="off"
+        spellCheck={false}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter' && token.trim()) onSubmit();
+        }}
       />
+      <button type="button" className="kg-pill kg-pill-ghost w-full justify-center mt-3 min-h-11" onClick={() => { void pasteFromClipboard(); }}>
+        從剪貼簿貼上
+      </button>
       {error && (
         <div className="mt-3">
           <ErrorBox>{error}</ErrorBox>
@@ -471,8 +619,178 @@ id="fld-kg-1"         className="kg-input font-mono2"
         disabled={busy || !token.trim()}
         onClick={onSubmit}
       >
-        {busy ? '驗證中…' : '驗證並進入'}
+        {busy ? '驗證中…' : '進入'}
       </button>
+    </div>
+  );
+}
+
+export function useKeyboardInset() {
+  const [inset, setInset] = useState(0);
+  useEffect(() => {
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => {
+      const overlap = Math.max(0, window.innerHeight - vv.height - vv.offsetTop);
+      setInset(overlap);
+    };
+    vv.addEventListener('resize', update);
+    vv.addEventListener('scroll', update);
+    window.addEventListener('resize', update);
+    update();
+    return () => {
+      vv.removeEventListener('resize', update);
+      vv.removeEventListener('scroll', update);
+      window.removeEventListener('resize', update);
+    };
+  }, []);
+  return inset;
+}
+
+export function StickySaveBar({
+  dirty,
+  busy,
+  onSave,
+  saveLabel = '儲存',
+  status,
+}: {
+  dirty: boolean;
+  busy: boolean;
+  onSave: () => void;
+  saveLabel?: string;
+  status?: string;
+}) {
+  const inset = useKeyboardInset();
+  const left = status ?? (busy ? '儲存中…' : dirty ? '● 未儲存' : '已同步');
+  return (
+    <div className="kg-savebar" style={{ bottom: inset }}>
+      <div className="mx-auto max-w-2xl flex items-center gap-3">
+        <span className={`font-mono2 text-xs ${dirty ? 'text-[#9e4b2c]' : 'text-[#6f6156]'}`}>
+          {busy ? '處理中…' : left}
+        </span>
+        <button
+          type="button"
+          className="kg-pill kg-pill-red ml-auto min-h-11 min-w-[5.5rem] justify-center"
+          disabled={!dirty || busy}
+          onClick={onSave}
+        >
+          {busy ? '處理中…' : saveLabel}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+export function ChoiceSeg<T extends string>({
+  value,
+  onChange,
+  options,
+  ariaLabel,
+}: {
+  value: T;
+  onChange: (v: T) => void;
+  options: Array<{ value: T; label: string }>;
+  ariaLabel: string;
+}) {
+  return (
+    <div className="kg-seg kg-seg-grow" role="radiogroup" aria-label={ariaLabel}>
+      {options.map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="radio"
+          aria-checked={value === o.value}
+          aria-pressed={value === o.value}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function RowMenu({
+  items,
+}: {
+  items: Array<{ label: string; onClick: () => void; danger?: boolean; disabled?: boolean }>;
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="relative shrink-0">
+      <button type="button" className="kg-iconbtn" aria-expanded={open} aria-label="更多動作" onClick={() => setOpen((v) => !v)}>
+        ⋯
+      </button>
+      {open && (
+        <>
+          <button type="button" className="fixed inset-0 z-20 cursor-default" aria-label="關閉選單" onClick={() => setOpen(false)} />
+          <div className="kg-menu" role="menu">
+            {items.map((it) => (
+              <button
+                key={it.label}
+                type="button"
+                role="menuitem"
+                disabled={it.disabled}
+                className={`kg-menu-item ${it.danger ? 'text-[#a8455e]' : ''}`}
+                onClick={() => {
+                  it.onClick();
+                  setOpen(false);
+                }}
+              >
+                {it.label}
+              </button>
+            ))}
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+export function FillSheet({ title, onDone, children }: { title: string; onDone: () => void; children: ReactNode }) {
+  useEffect(() => {
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, []);
+  return (
+    <div className="kg-sheet" role="dialog" aria-modal="true" aria-label={title}>
+      <div className="kg-sheet-bar">
+        <span className="font-bold flex-1 truncate">{title}</span>
+        <button type="button" className="kg-pill kg-pill-red min-h-11" onClick={onDone}>
+          完成
+        </button>
+      </div>
+      <div className="kg-sheet-body">{children}</div>
+    </div>
+  );
+}
+
+export function FillSection({
+  title,
+  meta,
+  open,
+  onToggle,
+  children,
+}: {
+  title: string;
+  meta?: string;
+  open: boolean;
+  onToggle: () => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className="kg-card-flat overflow-hidden">
+      <button type="button" className="kg-acc-head" aria-expanded={open} onClick={onToggle}>
+        <span className="font-bold flex-1 truncate text-left">{title}</span>
+        {meta ? <span className="font-mono2 text-[10px] text-[#6f6156] shrink-0">{meta}</span> : null}
+        <span className="kg-chevron text-[#6f6156]" aria-hidden="true">
+          {open ? '▴' : '▾'}
+        </span>
+      </button>
+      {open && <div className="p-4 space-y-4 border-t-2 border-[#e8dfd4]">{children}</div>}
     </div>
   );
 }
@@ -508,6 +826,7 @@ import type {
   QaItem,
   RadarDim,
   RelationExtra,
+  TagGroup,
   TimelineEvent,
   WorldBlock,
 } from '../lib/types';
@@ -518,61 +837,56 @@ export function ImageField({
   onChange,
   hint,
   square = false,
+  compact = false,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
   hint?: string;
   square?: boolean;
+  compact?: boolean;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const inputId = useId();
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [urlOpen, setUrlOpen] = useState(false);
   return (
     <div>
-      <label className="kg-label" htmlFor={inputId}>{label}</label>
-      <div className="flex items-start gap-3 flex-wrap">
-        <div
-          className={`shrink-0 overflow-hidden rounded-xl border-2 border-[#e8dfd4] bg-[#fbf8f3] ${square ? 'w-20 h-20' : 'w-36 h-20'}`}
-        >
-          {value ? (
-            <img src={value} alt={label} className="w-full h-full object-cover" />
-          ) : (
-            <div className="w-full h-full flex items-center justify-center font-mono2 text-[10px] text-[#6f6156]">
-              無圖
-            </div>
-          )}
-        </div>
-        <div className="flex-1 min-w-[220px] space-y-2">
-          <div className="flex gap-2">
-            <button
-              type="button"
-              className="kg-pill kg-pill-ghost kg-pill-sm"
-              disabled={busy}
-              onClick={() => fileRef.current?.click()}
-            >
-              {busy ? '處理中…' : '上傳圖片'}
-            </button>
-            {value && (
-              <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm" onClick={() => onChange('')}>
-                移除
-              </button>
-            )}
-          </div>
-          <input
-            id={inputId}
-            type="url"
-            inputMode="url"
-            className="kg-input font-mono2 text-xs"
-            value={value.startsWith('data:') ? '' : value}
-            onChange={(e) => onChange(e.target.value)}
-            placeholder="或貼上圖片網址 https://…"
-          />
-          {hint && <p className="font-mono2 text-[11px] text-[#6f6156]">{hint}</p>}
-          {err && <p className="text-xs font-bold text-[#a8455e]">{err}</p>}
-        </div>
+      <div className="flex items-center gap-1">
+        <label className="kg-label flex-1 mb-0" htmlFor={inputId}>{label}</label>
+        <RowMenu
+          items={[
+            { label: urlOpen ? '收起網址' : '貼上網址', onClick: () => setUrlOpen((v) => !v) },
+            { label: '移除圖片', onClick: () => onChange(''), danger: true, disabled: !value },
+          ]}
+        />
       </div>
+      <button
+        type="button"
+        className={`kg-drop mt-1.5 ${square ? 'kg-drop-sq' : ''} ${compact ? 'kg-drop-sm' : ''}`}
+        disabled={busy}
+        onClick={() => fileRef.current?.click()}
+      >
+        {value ? (
+          <img src={value} alt="" />
+        ) : (
+          <span className="font-mono2 text-[11px] text-[#6f6156] px-2">{busy ? '處理中…' : '點擊上傳'}</span>
+        )}
+      </button>
+      {urlOpen && (
+        <input
+          id={inputId}
+          type="url"
+          inputMode="url"
+          className="kg-input font-mono2 text-xs mt-2"
+          value={value.startsWith('data:') ? '' : value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder="https://…"
+        />
+      )}
+      {hint && <p className="font-mono2 text-[11px] text-[#6f6156] mt-1.5">{hint}</p>}
+      {err && <p className="text-xs font-bold text-[#a8455e] mt-1">{err}</p>}
       <input
         ref={fileRef}
         type="file"
@@ -862,8 +1176,10 @@ const newBlockField = (type: BlockFieldType, label = '', extra: Partial<BlockFie
   ...extra,
 });
 
-// 區塊模板（參考名帖設計）：一鍵建立常用組合，套用後都能再增減欄位
-const BLOCK_TEMPLATES: Array<{ name: string; desc: string; make: () => { title: string; fields: BlockField[] } }> = [
+export type BlockEditorMode = 'fill' | 'schema';
+export type BlockEditorVariant = 'character' | 'world';
+
+const CHAR_TEMPLATES: Array<{ name: string; desc: string; make: () => { title: string; fields: BlockField[] } }> = [
   {
     name: '基礎資料',
     desc: '身高、體重、生日、職業',
@@ -924,20 +1240,86 @@ const BLOCK_TEMPLATES: Array<{ name: string; desc: string; make: () => { title: 
       ],
     }),
   },
-  { name: '時間線', desc: '重要事件', make: () => ({ title: '大事記', fields: [newBlockField('timeline', '大事記')] }) },
-  { name: '重要日程', desc: '月曆標記＋日程表', make: () => ({ title: '重要日程', fields: [newBlockField('calendar', '')] }) },
-  { name: '相簿', desc: '一組圖片', make: () => ({ title: '相簿', fields: [newBlockField('image', '', { layout: 'grid' })] }) },
   {
-    name: 'Q&A',
-    desc: '一問一答',
+    name: '長文',
+    desc: '背景、性格、故事',
     make: () => ({
-      title: 'Q&A',
-      fields: [newBlockField('text', 'Q1'), newBlockField('textarea', 'A1', { style: 'indent' })],
+      title: '背景',
+      fields: [newBlockField('textarea', '', { style: 'normal' })],
+    }),
+  },
+  { name: '相簿', desc: '一組圖片', make: () => ({ title: '相簿', fields: [newBlockField('image', '', { layout: 'grid' })] }) },
+  { name: '時間線', desc: '重要事件', make: () => ({ title: '大事記', fields: [newBlockField('timeline', '大事記')] }) },
+];
+
+const WORLD_TEMPLATES: Array<{ name: string; desc: string; make: () => { title: string; fields: BlockField[] } }> = [
+  {
+    name: '年表',
+    desc: '世界大事按時間排列',
+    make: () => ({ title: '年表', fields: [newBlockField('timeline', '大事記')] }),
+  },
+  {
+    name: '地理／場所',
+    desc: '地點、特徵、圖片',
+    make: () => ({
+      title: '地理',
+      fields: [
+        newBlockField('text', '名稱'),
+        newBlockField('tags', '特徵'),
+        newBlockField('textarea', '說明', { style: 'box' }),
+        newBlockField('image', '風景', { layout: 'grid' }),
+      ],
+    }),
+  },
+  {
+    name: '勢力／陣營',
+    desc: '名稱、立場、相關角色',
+    make: () => ({
+      title: '勢力',
+      fields: [
+        newBlockField('text', '名稱'),
+        newBlockField('tags', '陣營'),
+        newBlockField('textarea', '主張', { style: 'box' }),
+        newBlockField('charref', '相關角色'),
+      ],
+    }),
+  },
+  {
+    name: '規則／禁忌',
+    desc: '世界怎麼運轉、什麼不能做',
+    make: () => ({
+      title: '規則',
+      fields: [
+        newBlockField('textarea', '運作規則', { style: 'box' }),
+        newBlockField('checklist', '禁忌'),
+        newBlockField('textarea', '例外', { style: 'indent' }),
+      ],
+    }),
+  },
+  {
+    name: '用語辭典',
+    desc: '專有名詞與解釋',
+    make: () => ({
+      title: '用語',
+      fields: [newBlockField('text', '詞條'), newBlockField('textarea', '解釋'), newBlockField('tags', '分類')],
+    }),
+  },
+  {
+    name: '素材',
+    desc: '圖、音、影、文件',
+    make: () => ({
+      title: '素材',
+      fields: [
+        newBlockField('image', '圖', { layout: 'grid' }),
+        newBlockField('audio', '音'),
+        newBlockField('video', '影'),
+        newBlockField('pdf', '文件'),
+      ],
     }),
   },
 ];
 
-// 區塊內單一欄位的編輯列
+// 區塊內單一欄位：一行名稱＋型別，內容直接在下面；其餘收進 ⋯
 function BlockFieldRow({
   field: f,
   onPatch,
@@ -958,23 +1340,43 @@ function BlockFieldRow({
   const t = f.type;
   const isTexty = t === 'text' || t === 'textarea';
   const needsOptions = t === 'select' || t === 'multiselect';
-  const hasPlaceholder = ['text', 'textarea', 'number', 'url'].includes(t);
+  const menu = [
+    {
+      label: (f.visibility ?? 'public') === 'private' ? '改為公開' : '改為私人',
+      onClick: () => onPatch({ visibility: (f.visibility ?? 'public') === 'private' ? 'public' : 'private' }),
+    },
+    { label: '上移', onClick: () => onMove(-1), disabled: isFirst },
+    { label: '下移', onClick: () => onMove(1), disabled: isLast },
+    ...(isTexty
+      ? FIELD_STYLES.map(([v, label]) => ({
+          label: `樣式：${label}`,
+          onClick: () => onPatch({ style: v }),
+        }))
+      : []),
+    ...(t === 'rating'
+      ? [3, 5, 10].map((m) => ({
+          label: `滿分 ${m}`,
+          onClick: () => onPatch({ max: m }),
+        }))
+      : []),
+    { label: '刪除欄位', onClick: onRemove, danger: true },
+  ];
   return (
-    <div className="rounded-xl border border-dashed border-[#e3d5c5] bg-[#fdfbf7]/70 p-3 space-y-2">
-      <div className="flex items-center gap-2 flex-wrap">
+    <div className="kg-field space-y-2">
+      <div className="flex items-center gap-2">
         <input
-          className="kg-input !h-9 !w-auto flex-1 min-w-[96px] text-sm font-bold"
+          className="kg-input !h-10 !w-auto flex-1 min-w-0 text-sm font-bold"
           value={f.label}
           onChange={(e) => onPatch({ label: e.target.value })}
-          placeholder="欄位名稱（可留空）"
+          placeholder="欄位名稱"
           maxLength={12}
         />
         <select
-          className="kg-select !h-9 !w-auto text-sm !py-0"
+          className="kg-select !h-10 !w-auto max-w-[38%] text-sm !py-0"
           value={t}
+          aria-label="欄位型別"
           onChange={(e) => {
             const nt = e.target.value as BlockFieldType;
-            // 切到雷達且無內容時預填五維；切走圖片／PDF 時清掉檔案型資料
             onPatch({
               type: nt,
               ...(nt === 'radar' && !f.content.trim() ? { content: stringifyRadar(DEFAULT_RADAR) } : {}),
@@ -993,82 +1395,24 @@ function BlockFieldRow({
             </optgroup>
           ))}
         </select>
-        <button
-          type="button"
-          className={`kg-pill kg-pill-sm shrink-0 ${(f.visibility ?? 'public') === 'private' ? 'kg-pill-red' : 'kg-pill-ghost'}`}
-          title="私人欄位只有本人與開設者看得見"
-          onClick={() => onPatch({ visibility: (f.visibility ?? 'public') === 'private' ? 'public' : 'private' })}
-        >
-          {(f.visibility ?? 'public') === 'private' ? '🔒 私人' : '公開'}
-        </button>
-        <span className="flex gap-1 ml-auto">
-          <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm !px-2" disabled={isFirst} onClick={() => onMove(-1)} aria-label="上移">
-            ↑
-          </button>
-          <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm !px-2" disabled={isLast} onClick={() => onMove(1)} aria-label="下移">
-            ↓
-          </button>
-          <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm !px-2 text-[#a8455e]" onClick={onRemove} aria-label="刪除欄位">
-            ×
-          </button>
-        </span>
+        {(f.visibility ?? 'public') === 'private' && (
+          <span className="font-mono2 text-[10px] text-[#a8455e] shrink-0">🔒</span>
+        )}
+        <RowMenu items={menu} />
       </div>
-      {isTexty && (
-        <div className="flex items-center gap-1 flex-wrap">
-          <span className="font-mono2 text-[11px] text-[#6f6156] mr-1">顯示樣式</span>
-          {FIELD_STYLES.map(([v, label]) => (
-            <button
-              key={v}
-              type="button"
-              className={`kg-pill kg-pill-sm ${(f.style ?? 'normal') === v ? 'kg-pill-ink' : 'kg-pill-ghost'}`}
-              onClick={() => onPatch({ style: v })}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      )}
-      {t === 'rating' && (
-        <div className="flex items-center gap-1 flex-wrap">
-          <span className="font-mono2 text-[11px] text-[#6f6156] mr-1">滿分</span>
-          {[3, 5, 10].map((m) => (
-            <button
-              key={m}
-              type="button"
-              className={`kg-pill kg-pill-sm ${(f.max ?? 5) === m ? 'kg-pill-ink' : 'kg-pill-ghost'}`}
-              onClick={() => onPatch({ max: m })}
-            >
-              {m}
-            </button>
-          ))}
-        </div>
-      )}
-      {(needsOptions || hasPlaceholder) && (
-        <div className="flex gap-2 flex-wrap">
-          {needsOptions && (
-            <input
-              className="kg-input !h-9 !w-auto flex-1 min-w-[180px] font-mono2 text-xs"
-              value={(f.options ?? []).join(',')}
-              onChange={(e) => onPatch({ options: e.target.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })}
-              placeholder="選項，用逗號分隔：人類,精靈,不明"
-            />
-          )}
-          {hasPlaceholder && (
-            <input
-              className="kg-input !h-9 !w-auto flex-1 min-w-[140px] font-mono2 text-xs"
-              value={f.placeholder ?? ''}
-              onChange={(e) => onPatch({ placeholder: e.target.value })}
-              placeholder="提示文字（選填）"
-              maxLength={30}
-            />
-          )}
-        </div>
+      {needsOptions && (
+        <input
+          className="kg-input !h-10 font-mono2 text-xs"
+          value={(f.options ?? []).join(',')}
+          onChange={(e) => onPatch({ options: e.target.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })}
+          placeholder="選項，逗號分隔：人類,精靈"
+        />
       )}
       {isTexty ? (
         t === 'text' ? (
           <input className="kg-input" value={f.content} onChange={(e) => onPatch({ content: e.target.value })} placeholder={f.placeholder || '內容…'} maxLength={200} />
         ) : (
-          <textarea className="kg-textarea" rows={3} value={f.content} onChange={(e) => onPatch({ content: e.target.value })} placeholder={f.placeholder || '內容…'} maxLength={1000} />
+          <textarea className="kg-textarea" rows={4} value={f.content} onChange={(e) => onPatch({ content: e.target.value })} placeholder={f.placeholder || '內容…'} maxLength={4000} />
         )
       ) : t === 'image' || t === 'pdf' ? (
         <BlockFileInput block={f} onPatch={onPatch} />
@@ -1084,7 +1428,104 @@ function BlockFieldRow({
   );
 }
 
-// 單一區塊的編輯卡（含即時預覽）
+// 填寫模式：只改內容，不露型別／刪除／排序
+function FillFieldRow({
+  field: f,
+  onPatch,
+  roster,
+}: {
+  field: BlockField;
+  onPatch: (p: Partial<BlockField>) => void;
+  roster: RosterLite[];
+}) {
+  const t = f.type;
+  const [sheet, setSheet] = useState(false);
+  const useSheet = t === 'textarea' || t === 'timeline' || t === 'calendar' || t === 'image';
+  const editor =
+    t === 'image' || t === 'pdf' ? (
+      <BlockFileInput block={f} onPatch={onPatch} />
+    ) : t === 'radar' ? (
+      <RadarInput value={f.content} onChange={(v) => onPatch({ content: v })} compact />
+    ) : t === 'text' ? (
+      <input
+        className="kg-input"
+        value={f.content}
+        onChange={(e) => onPatch({ content: e.target.value })}
+        placeholder={f.placeholder || '內容…'}
+        maxLength={200}
+      />
+    ) : t === 'textarea' ? (
+      <textarea
+        className="kg-textarea"
+        rows={12}
+        autoFocus={sheet}
+        value={f.content}
+        onChange={(e) => onPatch({ content: e.target.value })}
+        placeholder={f.placeholder || '內容…'}
+        maxLength={4000}
+      />
+    ) : (
+      <FieldInput
+        def={{ key: f.id, label: f.label || '欄位', type: t, options: f.options, placeholder: f.placeholder, max: f.max, style: f.style }}
+        value={f.content}
+        onChange={(v) => onPatch({ content: v })}
+        roster={roster}
+      />
+    );
+
+  let preview: ReactNode = <span className="kg-fill-preview-empty">點擊編輯</span>;
+  if (t === 'textarea') {
+    preview = f.content.trim() ? (
+      <span className="line-clamp-3 whitespace-pre-wrap">{f.content.trim()}</span>
+    ) : (
+      <span className="kg-fill-preview-empty">點擊寫長文</span>
+    );
+  } else if (t === 'timeline' || t === 'calendar') {
+    const n = timelineVisible(parseTimeline(f.content)).length;
+    preview = n ? <span>{n} 則</span> : <span className="kg-fill-preview-empty">點擊編輯</span>;
+  } else if (t === 'image') {
+    const n = f.images?.length ?? 0;
+    preview = n ? (
+      <span className="flex gap-1.5 overflow-hidden">
+        {(f.images ?? []).slice(0, 4).map((src) => (
+          <img key={src.slice(0, 48)} src={src} alt="" className="w-12 h-12 rounded-lg object-cover border border-[#e8dfd4]" />
+        ))}
+        {n > 4 && <span className="font-mono2 text-[11px] text-[#6f6156] self-center">+{n - 4}</span>}
+      </span>
+    ) : (
+      <span className="kg-fill-preview-empty">點擊加入圖片</span>
+    );
+  }
+
+  return (
+    <div className="space-y-1.5">
+      {(f.label || (f.visibility ?? 'public') === 'private') && (
+        <div className="flex items-center gap-2">
+          {f.label && <div className="kg-seclabel">（{f.label}）</div>}
+          {(f.visibility ?? 'public') === 'private' && (
+            <span className="font-mono2 text-[10px] text-[#a8455e]">🔒 私人</span>
+          )}
+        </div>
+      )}
+      {useSheet ? (
+        <>
+          <button type="button" className="kg-fill-preview" onClick={() => setSheet(true)}>
+            {preview}
+          </button>
+          {sheet && (
+            <FillSheet title={f.label || '編輯'} onDone={() => setSheet(false)}>
+              {editor}
+            </FillSheet>
+          )}
+        </>
+      ) : (
+        editor
+      )}
+    </div>
+  );
+}
+
+// 單一區塊的編輯卡（填寫＝手風琴；組版＝型別／排序／預覽）
 function BlockEditCard({
   block: b,
   index: i,
@@ -1094,6 +1535,9 @@ function BlockEditCard({
   onRemove,
   roster,
   slug,
+  mode,
+  open,
+  onToggle,
 }: {
   block: WorldBlock;
   index: number;
@@ -1103,6 +1547,9 @@ function BlockEditCard({
   onRemove: () => void;
   roster: RosterLite[];
   slug?: string;
+  mode: BlockEditorMode;
+  open: boolean;
+  onToggle: () => void;
 }) {
   const [showPreview, setShowPreview] = useState(false);
   const patchField = (fid: string, p: Partial<BlockField>) =>
@@ -1114,38 +1561,56 @@ function BlockEditCard({
     [next[fi], next[j]] = [next[j], next[fi]];
     onPatch({ fields: next });
   };
+
+  if (mode === 'fill') {
+    const filledN = b.fields.filter((f) => fieldHasContent(f.type, f.content, f.images)).length;
+    return (
+      <div className="kg-card-flat overflow-hidden">
+        <button type="button" className="kg-acc-head" aria-expanded={open} onClick={onToggle}>
+          <span className={`w-2 h-2 rounded-full shrink-0 ${filledN ? 'bg-[#9e4b2c]' : 'bg-[#e8dfd4]'}`} />
+          <span className="font-bold flex-1 truncate">{b.title || '未命名區塊'}</span>
+          <span className="font-mono2 text-[10px] text-[#6f6156] shrink-0">
+            {filledN}/{b.fields.length} 已填
+          </span>
+          <span className="kg-chevron text-[#6f6156]" aria-hidden="true">
+            {open ? '▴' : '▾'}
+          </span>
+        </button>
+        {open && (
+          <div className="p-4 space-y-4 border-t-2 border-[#e8dfd4]">
+            {b.fields.length === 0 ? (
+              <p className="text-sm text-[#6f6156]">這塊還沒有欄位。到「組版」去加。</p>
+            ) : (
+              b.fields.map((f) => <FillFieldRow key={f.id} field={f} onPatch={(p) => patchField(f.id, p)} roster={roster} />)
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="kg-card-flat overflow-hidden">
-      <div className="flex items-center gap-2 flex-wrap px-4 py-3 border-b-2 border-[#e8dfd4] bg-[#f6efe4]/50">
+      <div className="flex items-center gap-2 px-3 py-2 border-b border-[#e8dfd4] bg-[#f6efe4]/50">
         <span className="w-2 h-2 rounded-full bg-[#9e4b2c] shrink-0" />
         <input
-          className="kg-input !h-9 !w-auto flex-1 min-w-[120px] font-bold"
+          className="kg-input !h-10 !w-auto flex-1 min-w-0 font-bold"
           value={b.title}
           onChange={(e) => onPatch({ title: e.target.value })}
           placeholder="區塊標題"
           maxLength={20}
         />
-        <span className="font-mono2 text-[10px] text-[#6f6156] shrink-0">{b.fields.length} 個欄位</span>
-        <button
-          type="button"
-          className={`kg-pill kg-pill-sm shrink-0 ${showPreview ? 'kg-pill-ink' : 'kg-pill-ghost'}`}
-          onClick={() => setShowPreview(!showPreview)}
-        >
-          預覽
-        </button>
-        <span className="flex gap-1 ml-auto">
-          <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm !px-2" disabled={i === 0} onClick={() => onMove(-1)} aria-label="區塊上移">
-            ↑
-          </button>
-          <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm !px-2" disabled={i === count - 1} onClick={() => onMove(1)} aria-label="區塊下移">
-            ↓
-          </button>
-          <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm text-[#a8455e]" onClick={onRemove}>
-            刪除
-          </button>
-        </span>
+        <span className="font-mono2 text-[10px] text-[#6f6156] shrink-0">{b.fields.length} 欄</span>
+        <RowMenu
+          items={[
+            { label: showPreview ? '收起預覽' : '預覽成品', onClick: () => setShowPreview(!showPreview) },
+            { label: '上移', onClick: () => onMove(-1), disabled: i === 0 },
+            { label: '下移', onClick: () => onMove(1), disabled: i === count - 1 },
+            { label: '刪除區塊', onClick: onRemove, danger: true },
+          ]}
+        />
       </div>
-      <div className="p-4 space-y-3">
+      <div className="px-4">
         {b.fields.map((f, fi) => (
           <BlockFieldRow
             key={f.id}
@@ -1158,17 +1623,19 @@ function BlockEditCard({
             roster={roster}
           />
         ))}
-        <button
-          type="button"
-          className="kg-pill kg-pill-ghost kg-pill-sm border-dashed"
-          onClick={() => onPatch({ fields: [...b.fields, newBlockField('text')] })}
-        >
-          ＋ 新增欄位
-        </button>
+        <div className="py-3">
+          <button
+            type="button"
+            className="kg-pill kg-pill-ghost kg-pill-sm border-dashed min-h-10"
+            onClick={() => onPatch({ fields: [...b.fields, newBlockField('text')] })}
+          >
+            ＋ 欄位
+          </button>
+        </div>
       </div>
       {showPreview && (
-        <div className="border-t-2 border-dashed border-[#e8dfd4] px-4 py-3 bg-[#fbf8f3]">
-          <div className="font-mono2 text-[10px] text-[#6f6156] mb-2">顯示預覽（本人視角）</div>
+        <div className="border-t border-dashed border-[#e8dfd4] px-4 py-3 bg-[#fbf8f3]">
+          <div className="font-mono2 text-[10px] text-[#6f6156] mb-2">成品預覽</div>
           <BlockView block={b} slug={slug} roster={roster} bare />
         </div>
       )}
@@ -1181,12 +1648,35 @@ export function BlocksEditor({
   onChange,
   roster = [],
   slug,
+  mode = 'schema',
+  variant = 'character',
+  onRequestSchema,
+  onAdded,
+  seedOpenId,
 }: {
   value: WorldBlock[];
   onChange: (v: WorldBlock[]) => void;
   roster?: RosterLite[];
   slug?: string;
+  mode?: BlockEditorMode;
+  variant?: BlockEditorVariant;
+  onRequestSchema?: () => void;
+  onAdded?: (id: string) => void;
+  seedOpenId?: string | null;
 }) {
+  const templates = variant === 'world' ? WORLD_TEMPLATES : CHAR_TEMPLATES;
+  const [openId, setOpenId] = useState<string | null>(seedOpenId ?? value[0]?.id ?? null);
+  useEffect(() => {
+    if (seedOpenId && value.some((b) => b.id === seedOpenId)) {
+      setOpenId(seedOpenId);
+    }
+  }, [seedOpenId, value]);
+  useEffect(() => {
+    if (mode !== 'fill') return;
+    if (openId && value.some((b) => b.id === openId)) return;
+    setOpenId(value[value.length - 1]?.id ?? null);
+  }, [mode, value, openId]);
+
   const patch = (id: string, p: Partial<WorldBlock>) => onChange(value.map((b) => (b.id === id ? { ...b, ...p } : b)));
   const move = (i: number, dir: -1 | 1) => {
     const j = i + dir;
@@ -1195,8 +1685,25 @@ export function BlocksEditor({
     [next[i], next[j]] = [next[j], next[i]];
     onChange(next);
   };
+  const addFrom = (make?: () => { title: string; fields: BlockField[] }) => {
+    const block = { id: uid('wb'), ...(make ? make() : { title: '', fields: [] as BlockField[] }) };
+    onChange([...value, block]);
+    setOpenId(block.id);
+    onAdded?.(block.id);
+  };
+
   return (
     <div className="space-y-4">
+      {value.length === 0 && mode === 'fill' && (
+        <div className="kg-card-flat p-5 text-center space-y-3">
+          <p className="text-sm text-[#6f6156]">還沒有區塊。</p>
+          {onRequestSchema && (
+            <button type="button" className="kg-pill kg-pill-red min-h-11" onClick={onRequestSchema}>
+              去組版，加一塊
+            </button>
+          )}
+        </div>
+      )}
       {value.map((b, i) => (
         <BlockEditCard
           key={b.id}
@@ -1208,31 +1715,38 @@ export function BlocksEditor({
           onRemove={() => onChange(value.filter((x) => x.id !== b.id))}
           roster={roster}
           slug={slug}
+          mode={mode}
+          open={openId === b.id}
+          onToggle={() => setOpenId(openId === b.id ? null : b.id)}
         />
       ))}
-      <button
-        type="button"
-        className="kg-pill kg-pill-ghost w-full justify-center border-dashed"
-        onClick={() => onChange([...value, { id: uid('wb'), title: '', fields: [] }])}
-      >
-        ＋ 空白區塊
-      </button>
-      <div>
-        <div className="font-mono2 text-[11px] text-[#6f6156] mb-1.5">或從模板開始（套用後都能再增減欄位）</div>
-        <div className="flex flex-wrap gap-1.5">
-          {BLOCK_TEMPLATES.map((t) => (
-            <button
-              key={t.name}
-              type="button"
-              title={t.desc}
-              className="kg-pill kg-pill-ghost kg-pill-sm border-dashed"
-              onClick={() => onChange([...value, { id: uid('wb'), ...t.make() }])}
-            >
-              ＋ {t.name}
-            </button>
-          ))}
-        </div>
-      </div>
+      {mode === 'schema' && (
+        <>
+          <button
+            type="button"
+            className="kg-pill kg-pill-ghost w-full justify-center border-dashed min-h-11"
+            onClick={() => addFrom()}
+          >
+            ＋ 空白區塊
+          </button>
+          <div>
+            <div className="font-mono2 text-[11px] text-[#6f6156] mb-1.5">或從模板開始（套用後都能再增減欄位）</div>
+            <div className="flex flex-wrap gap-1.5">
+              {templates.map((t) => (
+                <button
+                  key={t.name}
+                  type="button"
+                  title={t.desc}
+                  className="kg-pill kg-pill-ghost kg-pill-sm border-dashed min-h-10"
+                  onClick={() => addFrom(t.make)}
+                >
+                  ＋ {t.name}
+                </button>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1467,7 +1981,15 @@ function BlockFileInput({ block, onPatch }: { block: BlockField; onPatch: (p: Pa
 }
 
 // ---------- QA 編輯器 ----------
-export function QaEditor({ value, onChange }: { value: QaItem[]; onChange: (v: QaItem[]) => void }) {
+export function QaEditor({
+  value,
+  onChange,
+  groups = [],
+}: {
+  value: QaItem[];
+  onChange: (v: QaItem[]) => void;
+  groups?: TagGroup[];
+}) {
   const patch = (id: string, p: Partial<QaItem>) => onChange(value.map((x) => (x.id === id ? { ...x, ...p } : x)));
   return (
     <div className="space-y-4">
@@ -1475,10 +1997,10 @@ export function QaEditor({ value, onChange }: { value: QaItem[]; onChange: (v: Q
         <div key={item.id} className="kg-card-flat p-4 sm:p-5 space-y-3">
           <div className="flex items-center gap-2">
             <span className="font-huninn text-[#9e4b2c] shrink-0">Q</span>
-            <input
+            <ImeInput
               className="kg-input !w-auto flex-1"
               value={item.q}
-              onChange={(e) => patch(item.id, { q: e.target.value })}
+              onChange={(v) => patch(item.id, { q: v })}
               placeholder="問題"
               maxLength={60}
             />
@@ -1492,24 +2014,156 @@ export function QaEditor({ value, onChange }: { value: QaItem[]; onChange: (v: Q
           </div>
           <div className="flex items-start gap-2">
             <span className="font-huninn text-[#24697f] shrink-0 mt-2">A</span>
-            <textarea
+            <ImeTextarea
               className="kg-textarea flex-1"
               rows={2}
               value={item.a}
-              onChange={(e) => patch(item.id, { a: e.target.value })}
+              onChange={(v) => patch(item.id, { a: v })}
               placeholder="回答"
               maxLength={500}
             />
           </div>
+          {groups.length > 0 && (
+            <TagPicker groups={groups} value={item.tags ?? []} onChange={(tags) => patch(item.id, { tags })} />
+          )}
         </div>
       ))}
       <button
         type="button"
         className="kg-pill kg-pill-ghost w-full justify-center border-dashed"
-        onClick={() => onChange([...value, { id: uid('qa'), q: '', a: '' }])}
+        onClick={() => onChange([...value, { id: uid('qa'), q: '', a: '', tags: [] }])}
       >
         ＋ 新增問答
       </button>
+    </div>
+  );
+}
+
+export function TagPicker({
+  groups,
+  value,
+  onChange,
+}: {
+  groups: TagGroup[];
+  value: string[];
+  onChange: (v: string[]) => void;
+}) {
+  if (!groups.length) return null;
+  const toggle = (tag: string) => onChange(value.includes(tag) ? value.filter((t) => t !== tag) : [...value, tag]);
+  return (
+    <div className="space-y-3">
+      {groups.map((g) => (
+        <div key={g.id}>
+          <div className="kg-seclabel mb-1.5">
+            （{g.name}）{g.required ? <span className="req"> *</span> : null}
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            {g.tags.map((t) => (
+              <button
+                key={t}
+                type="button"
+                className={`kg-pill kg-pill-sm ${value.includes(t) ? 'kg-pill-ink' : 'kg-pill-ghost border !border-[#e8dfd4]'}`}
+                onClick={() => toggle(t)}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function FilterChips({
+  groups,
+  tags,
+  value,
+  onChange,
+}: {
+  groups?: TagGroup[];
+  tags?: string[];
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const grouped = (groups ?? []).filter((g) => g.tags.length);
+  const groupedSet = new Set(grouped.flatMap((g) => g.tags));
+  const rest = (tags ?? []).filter((t) => !groupedSet.has(t));
+  if (!grouped.length && !rest.length) return null;
+  const chip = (t: string) => (
+    <button
+      key={t}
+      type="button"
+      className={`kg-pill kg-pill-sm ${value === t ? 'kg-pill-ink' : 'kg-pill-ghost border !border-[#e8dfd4]'}`}
+      onClick={() => onChange(value === t ? '' : t)}
+    >
+      {t}
+    </button>
+  );
+  return (
+    <div className="space-y-2 mb-4">
+      <div className="flex flex-wrap gap-1.5 items-center">
+        <button
+          type="button"
+          className={`kg-pill kg-pill-sm ${!value ? 'kg-pill-ink' : 'kg-pill-ghost border !border-[#e8dfd4]'}`}
+          onClick={() => onChange('')}
+        >
+          全部
+        </button>
+        {rest.map(chip)}
+      </div>
+      {grouped.map((g) => (
+        <div key={g.id} className="flex flex-wrap gap-1.5 items-center">
+          {g.name ? <span className="font-mono2 text-[11px] text-[#6f6156] shrink-0 w-10">{g.name}</span> : null}
+          {g.tags.map(chip)}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function TagGroupEditor({ value, onChange }: { value: TagGroup[]; onChange: (v: TagGroup[]) => void }) {
+  const patch = (id: string, p: Partial<TagGroup>) => onChange(value.map((g) => (g.id === id ? { ...g, ...p } : g)));
+  return (
+    <div className="space-y-3">
+      {value.map((g) => (
+        <div key={g.id} className="kg-field space-y-2">
+          <div className="flex items-center gap-2">
+            <ImeInput
+              className="kg-input !h-10 !w-auto flex-1 min-w-0 font-bold"
+              value={g.name}
+              onChange={(v) => patch(g.id, { name: v })}
+              placeholder="分類名（陣營、種族…）"
+              maxLength={12}
+            />
+            <label className="flex items-center gap-1.5 text-sm font-bold cursor-pointer select-none shrink-0">
+              <input
+                type="checkbox"
+                checked={!!g.required}
+                onChange={(e) => patch(g.id, { required: e.target.checked })}
+                className="w-4 h-4 accent-[#9e4b2c]"
+              />
+              角色必填
+            </label>
+            <button
+              type="button"
+              className="kg-pill kg-pill-ghost kg-pill-sm text-[#a8455e]"
+              onClick={() => onChange(value.filter((x) => x.id !== g.id))}
+            >
+              刪除
+            </button>
+          </div>
+          <TagsInput value={g.tags.join(',')} onChange={(v) => patch(g.id, { tags: v.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })} placeholder="標籤，Enter 新增…" />
+        </div>
+      ))}
+      <button
+        type="button"
+        className="kg-pill kg-pill-ghost kg-pill-sm border-dashed"
+        onClick={() => onChange([...value, { id: uid('tg'), name: '', tags: [], required: false }])}
+      >
+        ＋ 一組分類
+      </button>
+      <p className="font-mono2 text-[11px] text-[#6f6156]">角色加入時勾選；問答也可掛同一批標籤。名單與問答頁能用標籤篩選。</p>
     </div>
   );
 }
@@ -1601,8 +2255,8 @@ const fieldType = (f: FieldDef) => f.type ?? 'text';
 function TagsInput({ value, onChange, placeholder }: { value: string; onChange: (v: string) => void; placeholder?: string }) {
   const [draft, setDraft] = useState('');
   const tags = value ? value.split(',').map((s) => s.trim()).filter(Boolean) : [];
-  const commit = () => {
-    const t = draft.trim();
+  const commit = (raw?: string) => {
+    const t = (raw ?? draft).trim();
     if (t && !tags.includes(t)) onChange([...tags, t].join(','));
     setDraft('');
   };
@@ -1616,19 +2270,20 @@ function TagsInput({ value, onChange, placeholder }: { value: string; onChange: 
           </button>
         </span>
       ))}
-      <input
+      <ImeInput
         className="flex-1 min-w-[90px] bg-transparent outline-none text-sm"
         value={draft}
-        onChange={(e) => setDraft(e.target.value)}
+        onChange={setDraft}
         onKeyDown={(e) => {
+          if (isComposingEvent(e) || e.key === 'Process') return;
           if (e.key === 'Enter' || e.key === ',') {
             e.preventDefault();
-            commit();
+            commit(e.currentTarget.value);
           } else if (e.key === 'Backspace' && !draft && tags.length) {
             onChange(tags.slice(0, -1).join(','));
           }
         }}
-        onBlur={commit}
+        onBlur={(e) => commit(e.currentTarget.value)}
         placeholder={tags.length === 0 ? placeholder ?? '輸入後 Enter…' : ''}
       />
     </div>
@@ -1724,38 +2379,58 @@ export function RadarChart({ dims: rawDims, size = 190 }: { dims: RadarDim[]; si
   );
 }
 
-export function RadarInput({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+export function RadarInput({ value, onChange, compact = false }: { value: string; onChange: (v: string) => void; compact?: boolean }) {
   const dims = parseRadar(value);
   const set = (next: RadarDim[]) => onChange(stringifyRadar(next));
+  const bump = (i: number, delta: number) =>
+    set(dims.map((x, j) => (j === i ? { ...x, value: Math.max(0, Math.min(5, x.value + delta)) } : x)));
   return (
-    <div className="flex flex-wrap items-start gap-4 pt-1">
-      <RadarChart dims={dims} />
+    <div className={`flex flex-wrap items-start gap-4 pt-1 ${compact ? '' : ''}`}>
+      {!compact && <RadarChart dims={dims} />}
       <div className="flex-1 min-w-[220px] space-y-1.5">
         {dims.map((d, i) => (
           <div key={i} className="flex items-center gap-2">
-            <input
-              className="kg-input !h-9 !w-24 text-sm"
-              value={d.label}
-              onChange={(e) => set(dims.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
-              placeholder="維度"
-              maxLength={6}
-            />
-            <input
-              type="range"
-              min={0}
-              max={5}
-              step={1}
-              value={d.value}
-              onChange={(e) => set(dims.map((x, j) => (j === i ? { ...x, value: Number(e.target.value) } : x)))}
-              className="flex-1 accent-[#24697f]"
-            />
-            <span className="font-mono2 text-sm text-[#24697f] w-4 text-center">{d.value}</span>
-            <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm text-[#a8455e] shrink-0" onClick={() => set(dims.filter((_, j) => j !== i))}>
-              ×
-            </button>
+            {compact ? (
+              <span className="text-sm font-bold w-16 shrink-0 truncate">{d.label || '維度'}</span>
+            ) : (
+              <input
+                className="kg-input !h-9 !w-24 text-sm"
+                value={d.label}
+                onChange={(e) => set(dims.map((x, j) => (j === i ? { ...x, label: e.target.value } : x)))}
+                placeholder="維度"
+                maxLength={6}
+              />
+            )}
+            {compact ? (
+              <div className="flex items-center gap-1 ml-auto">
+                <button type="button" className="kg-pill kg-pill-ghost !px-3 min-h-10 min-w-10 justify-center" aria-label="減少" onClick={() => bump(i, -1)}>
+                  −
+                </button>
+                <span className="font-mono2 text-sm text-[#24697f] w-6 text-center">{d.value}</span>
+                <button type="button" className="kg-pill kg-pill-ghost !px-3 min-h-10 min-w-10 justify-center" aria-label="增加" onClick={() => bump(i, 1)}>
+                  ＋
+                </button>
+              </div>
+            ) : (
+              <>
+                <input
+                  type="range"
+                  min={0}
+                  max={5}
+                  step={1}
+                  value={d.value}
+                  onChange={(e) => set(dims.map((x, j) => (j === i ? { ...x, value: Number(e.target.value) } : x)))}
+                  className="flex-1 accent-[#24697f]"
+                />
+                <span className="font-mono2 text-sm text-[#24697f] w-4 text-center">{d.value}</span>
+                <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm text-[#a8455e] shrink-0" onClick={() => set(dims.filter((_, j) => j !== i))}>
+                  ×
+                </button>
+              </>
+            )}
           </div>
         ))}
-        {dims.length < 8 && (
+        {!compact && dims.length < 8 && (
           <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm border-dashed" onClick={() => set([...dims, { label: '', value: 3 }])}>
             ＋ 新增維度
           </button>
@@ -2234,7 +2909,7 @@ export function StyledText({ text, style = 'normal' }: { text: string; style?: F
 export function FieldInput({ def, value, onChange, roster = [], id }: { def: FieldDef; value: string; onChange: (v: string) => void; roster?: RosterLite[]; id?: string }) {
   const t = fieldType(def);
   if (t === 'textarea') {
-    return <textarea id={id} className="kg-textarea" rows={3} value={value} onChange={(e) => onChange(e.target.value)} placeholder={def.placeholder} maxLength={1000} />;
+    return <ImeTextarea id={id} className="kg-textarea" rows={3} value={value} onChange={onChange} placeholder={def.placeholder} maxLength={1000} />;
   }
   if (t === 'tags') {
     return <TagsInput value={value} onChange={onChange} placeholder={def.placeholder} />;
@@ -2330,7 +3005,72 @@ export function FieldInput({ def, value, onChange, roster = [], id }: { def: Fie
     );
   }
   const inputType = t === 'number' ? 'number' : t === 'date' ? 'date' : t === 'url' ? 'url' : 'text';
-  return <input id={id} className="kg-input" type={inputType} inputMode={t === 'url' ? 'url' : undefined} value={value} onChange={(e) => onChange(e.target.value)} placeholder={def.placeholder} maxLength={120} />;
+  if (t === 'number' || t === 'date' || t === 'url') {
+    return <input id={id} className="kg-input" type={inputType} inputMode={t === 'url' ? 'url' : undefined} value={value} onChange={(e) => onChange(e.target.value)} placeholder={def.placeholder} maxLength={120} />;
+  }
+  return <ImeInput id={id} className="kg-input" value={value} onChange={onChange} placeholder={def.placeholder} maxLength={120} />;
+}
+
+export function SheetableField({
+  def,
+  value,
+  onChange,
+  roster = [],
+  id,
+}: {
+  def: FieldDef;
+  value: string;
+  onChange: (v: string) => void;
+  roster?: RosterLite[];
+  id?: string;
+}) {
+  const t = fieldType(def);
+  const [sheet, setSheet] = useState(false);
+  const useSheet = t === 'textarea' || t === 'timeline' || t === 'calendar' || t === 'image' || t === 'palette';
+  const editor = <FieldInput id={id} def={def} value={value} onChange={onChange} roster={roster} />;
+  if (!useSheet) return editor;
+
+  let preview: ReactNode = <span className="kg-fill-preview-empty">點擊編輯</span>;
+  if (t === 'textarea') {
+    preview = value.trim() ? (
+      <span className="line-clamp-3 whitespace-pre-wrap">{value.trim()}</span>
+    ) : (
+      <span className="kg-fill-preview-empty">點擊寫長文</span>
+    );
+  } else if (t === 'timeline' || t === 'calendar') {
+    const n = timelineVisible(parseTimeline(value)).length;
+    preview = n ? <span>{n} 則</span> : <span className="kg-fill-preview-empty">點擊編輯</span>;
+  } else if (t === 'image') {
+    preview = value ? (
+      <img src={value} alt="" className="h-16 rounded-lg object-cover border border-[#e8dfd4]" />
+    ) : (
+      <span className="kg-fill-preview-empty">點擊加入圖片</span>
+    );
+  } else if (t === 'palette') {
+    const cols = paletteVisible(parsePalette(value));
+    preview = cols.length ? (
+      <span className="flex gap-1">
+        {cols.slice(0, 6).map((c) => (
+          <span key={c.hex} className="w-6 h-6 rounded-full border border-[#e8dfd4]" style={{ background: c.hex }} />
+        ))}
+      </span>
+    ) : (
+      <span className="kg-fill-preview-empty">點擊編輯色票</span>
+    );
+  }
+
+  return (
+    <>
+      <button type="button" className="kg-fill-preview" onClick={() => setSheet(true)}>
+        {preview}
+      </button>
+      {sheet && (
+        <FillSheet title={def.label || '編輯'} onDone={() => setSheet(false)}>
+          {editor}
+        </FillSheet>
+      )}
+    </>
+  );
 }
 
 // 依欄位類型渲染顯示（角色頁／企劃頁）
@@ -2398,115 +3138,75 @@ export function FieldsEditor({ value, onChange }: { value: FieldDef[]; onChange:
     onChange([...value, { key: uid('f'), label, ...def }]);
   };
   return (
-    <div className="space-y-3">
+    <div>
       {value.map((f) => {
         const t = fieldType(f);
         const needsOptions = t === 'select' || t === 'multiselect';
         const isTexty = t === 'text' || t === 'textarea';
-        const hasPlaceholder = !needsOptions && !['rating', 'color', 'checklist', 'radar', 'timeline', 'calendar', 'palette', 'image', 'audio', 'video', 'charref'].includes(t);
+        const menu = [
+          {
+            label: (f.visibility ?? 'public') === 'private' ? '改為公開' : '改為私人',
+            onClick: () => patch(f.key, { visibility: (f.visibility ?? 'public') === 'private' ? 'public' : 'private' }),
+          },
+          { label: f.required ? '取消必填' : '設為必填', onClick: () => patch(f.key, { required: !f.required }) },
+          ...(isTexty
+            ? FIELD_STYLES.map(([v, label]) => ({
+                label: `樣式：${label}`,
+                onClick: () => patch(f.key, { style: v }),
+              }))
+            : []),
+          ...(t === 'rating'
+            ? [3, 5, 10].map((m) => ({
+                label: `滿分 ${m}`,
+                onClick: () => patch(f.key, { max: m }),
+              }))
+            : []),
+          { label: '刪除欄位', onClick: () => onChange(value.filter((x) => x.key !== f.key)), danger: true },
+        ];
         return (
-          <div key={f.key} className="kg-card-flat p-3.5 space-y-2.5">
-            <div className="flex items-center gap-2 flex-wrap">
+          <div key={f.key} className="kg-field space-y-2">
+            <div className="flex items-center gap-2">
               <input
-                className="kg-input !w-auto flex-1 min-w-[110px]"
+                className="kg-input !h-10 !w-auto flex-1 min-w-0 text-sm font-bold"
                 value={f.label}
                 onChange={(e) => patch(f.key, { label: e.target.value })}
                 placeholder="欄位名稱"
                 maxLength={12}
               />
               <select
-                className="kg-select !w-auto text-sm"
+                className="kg-select !h-10 !w-auto max-w-[42%] text-sm !py-0"
                 value={t}
+                aria-label="欄位型別"
                 onChange={(e) => patch(f.key, { type: e.target.value as FieldDef['type'] })}
               >
                 {FIELD_TYPE_GROUPS.map((g) => (
                   <optgroup key={g.group} label={g.group}>
                     {g.items.map((it) => (
                       <option key={it.value} value={it.value}>
-                        {it.label}（{it.hint}）
+                        {it.label}
                       </option>
                     ))}
                   </optgroup>
                 ))}
               </select>
-              <button
-                type="button"
-                className={`kg-pill kg-pill-sm shrink-0 ${(f.visibility ?? 'public') === 'private' ? 'kg-pill-red' : 'kg-pill-ghost'}`}
-                title="私人欄位只有角色本人與開設者看得見"
-                onClick={() => patch(f.key, { visibility: (f.visibility ?? 'public') === 'private' ? 'public' : 'private' })}
-              >
-                {(f.visibility ?? 'public') === 'private' ? '🔒 私人' : '公開'}
-              </button>
-              <label className="flex items-center gap-1.5 text-sm font-bold cursor-pointer select-none shrink-0">
-                <input
-                  type="checkbox"
-                  checked={!!f.required}
-                  onChange={(e) => patch(f.key, { required: e.target.checked })}
-                  className="w-4 h-4 accent-[#9e4b2c]"
-                />
-                必填
-              </label>
-              <button
-                type="button"
-                className="kg-pill kg-pill-ghost kg-pill-sm text-[#a8455e] shrink-0 ml-auto"
-                onClick={() => onChange(value.filter((x) => x.key !== f.key))}
-              >
-                刪除
-              </button>
-            </div>
-            {isTexty && (
-              <div className="flex items-center gap-1 flex-wrap">
-                <span className="font-mono2 text-[11px] text-[#6f6156] mr-1">顯示樣式</span>
-                {FIELD_STYLES.map(([v, label]) => (
-                  <button
-                    key={v}
-                    type="button"
-                    className={`kg-pill kg-pill-sm ${(f.style ?? 'normal') === v ? 'kg-pill-ink' : 'kg-pill-ghost'}`}
-                    onClick={() => patch(f.key, { style: v })}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-            )}
-            {t === 'rating' && (
-              <div className="flex items-center gap-1 flex-wrap">
-                <span className="font-mono2 text-[11px] text-[#6f6156] mr-1">滿分</span>
-                {[3, 5, 10].map((m) => (
-                  <button
-                    key={m}
-                    type="button"
-                    className={`kg-pill kg-pill-sm ${(f.max ?? 5) === m ? 'kg-pill-ink' : 'kg-pill-ghost'}`}
-                    onClick={() => patch(f.key, { max: m })}
-                  >
-                    滿分 {m}
-                  </button>
-                ))}
-              </div>
-            )}
-            <div className="flex gap-2 flex-wrap">
-              {hasPlaceholder && (
-                <input
-                  className="kg-input !w-auto flex-1 min-w-[140px] font-mono2 text-xs"
-                  value={f.placeholder ?? ''}
-                  onChange={(e) => patch(f.key, { placeholder: e.target.value })}
-                  placeholder="提示文字（選填）"
-                  maxLength={30}
-                />
+              {(f.visibility ?? 'public') === 'private' && (
+                <span className="font-mono2 text-[10px] text-[#a8455e] shrink-0">🔒</span>
               )}
-              {needsOptions && (
-                <input
-                  className="kg-input !w-auto flex-1 min-w-[180px] font-mono2 text-xs"
-                  value={(f.options ?? []).join(',')}
-                  onChange={(e) => patch(f.key, { options: e.target.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })}
-                  placeholder="選項，用逗號分隔：人類,精靈,不明"
-                />
-              )}
+              {f.required && <span className="font-mono2 text-[10px] text-[#9e4b2c] shrink-0">必填</span>}
+              <RowMenu items={menu} />
             </div>
+            {needsOptions && (
+              <input
+                className="kg-input !h-10 font-mono2 text-xs"
+                value={(f.options ?? []).join(',')}
+                onChange={(e) => patch(f.key, { options: e.target.value.split(/[,，]/).map((s) => s.trim()).filter(Boolean) })}
+                placeholder="選項，逗號分隔：人類,精靈"
+              />
+            )}
           </div>
         );
       })}
-      <div className="flex items-center gap-1.5 flex-wrap">
+      <div className="flex items-center gap-1.5 flex-wrap pt-3">
         <span className="font-mono2 text-[11px] text-[#6f6156]">常見欄位</span>
         {COMMON_FIELDS.map(({ label, def }) => {
           const exists = value.some((f) => f.label === label);
@@ -2525,12 +3225,12 @@ export function FieldsEditor({ value, onChange }: { value: FieldDef[]; onChange:
       </div>
       <button
         type="button"
-        className="kg-pill kg-pill-ghost kg-pill-sm border-dashed"
+        className="kg-pill kg-pill-ghost kg-pill-sm border-dashed mt-2"
         onClick={() => onChange([...value, { key: uid('f'), label: '', type: 'text', placeholder: '', required: false }])}
       >
         ＋ 新增欄位
       </button>
-      <p className="font-mono2 text-[11px] text-[#6f6156]">＊ 刪除欄位不會清除角色已填的資料，只是不再顯示於表單。私人欄位只有角色本人與開設者看得見。</p>
+      <p className="font-mono2 text-[11px] text-[#6f6156] mt-2">＊ 刪除欄位不會清掉角色已填的資料，只是不再顯示。私人欄位只有本人與開設者看得見。</p>
     </div>
   );
 }
@@ -2543,10 +3243,10 @@ export function ExtrasEditor({ value, onChange }: { value: RelationExtra[]; onCh
       {value.map((x) => (
         <div key={x.id} className="kg-card-flat p-4 space-y-2.5">
           <div className="flex items-center gap-2">
-            <input
+            <ImeInput
               className="kg-input !w-auto flex-1 font-bold"
               value={x.title}
-              onChange={(e) => patch(x.id, { title: e.target.value })}
+              onChange={(v) => patch(x.id, { title: v })}
               placeholder="區塊標題（如：兩人的回憶）"
               maxLength={20}
             />
@@ -2558,11 +3258,11 @@ export function ExtrasEditor({ value, onChange }: { value: RelationExtra[]; onCh
               刪除
             </button>
           </div>
-          <textarea
+          <ImeTextarea
             className="kg-textarea"
             rows={3}
             value={x.content}
-            onChange={(e) => patch(x.id, { content: e.target.value })}
+            onChange={(v) => patch(x.id, { content: v })}
             placeholder="補充內容…"
             maxLength={1000}
           />

@@ -6,7 +6,7 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { characters, events, projects, relations, type ProjectRow } from '../db/schema';
 import { AUTH_FAIL, genSlug, genToken, normJoinCode, sha256hex } from '../auth/token';
 import { resolveToken, ownerCookieLine } from '../auth/guard';
-import { fromJson, type FieldDef, type WorldBlock } from './shapes';
+import { fromJson, sanitizeLinks, sanitizeTagGroups, type FieldDef, type WorldBlock } from './shapes';
 import { toChar } from './character';
 
 type DB = DrizzleD1Database;
@@ -37,6 +37,8 @@ export function toProject(p: ProjectRow) {
     is_verified: !!p.isVerified,
     announcement: p.announcement,
     field_schema: fromJson<FieldDef[]>(p.fieldSchema, []),
+    tag_groups: sanitizeTagGroups(fromJson(p.tagGroups, [])),
+    links: sanitizeLinks(fromJson(p.links, [])),
     rev: p.rev,
     created_at: p.createdAt,
     updated_at: p.updatedAt,
@@ -65,6 +67,7 @@ export async function createProject(
   input: {
     title: string; summary: string; cover_url?: string; icon_url?: string;
     visibility?: string; join_mode: string; join_code?: string;
+    links?: unknown;
   },
 ) {
   const slug = await genSlugUnique(db);
@@ -85,6 +88,8 @@ export async function createProject(
     ownerTokenHash: await sha256hex(ownerToken),
     transferCodeHash: await sha256hex(transferCode),
     fieldSchema: DEFAULT_FIELDS,
+    tagGroups: [],
+    links: sanitizeLinks(input.links),
     createdAt: now,
     updatedAt: now,
   });
@@ -141,6 +146,7 @@ export async function patchProject(
     qa?: { id: string; q: string; a: string }[]; cover_url?: string; icon_url?: string;
     visibility?: string; join_mode?: string; signups_open?: boolean; join_code?: string;
     announcement?: string; field_schema?: FieldDef[]; expected_rev?: number;
+    tag_groups?: unknown; links?: unknown;
   },
 ): Promise<{ ok: true; updated_at: number; rev: number } | { error: string; conflict?: true }> {
   const p = await getProjectRaw(db, slug);
@@ -163,6 +169,8 @@ export async function patchProject(
   if (patch.signups_open !== undefined) set.signupsOpen = !!patch.signups_open;
   if (patch.announcement !== undefined) set.announcement = patch.announcement || null;
   if (patch.field_schema !== undefined) set.fieldSchema = patch.field_schema;
+  if (patch.tag_groups !== undefined) set.tagGroups = sanitizeTagGroups(patch.tag_groups);
+  if (patch.links !== undefined) set.links = sanitizeLinks(patch.links);
   if (patch.join_code !== undefined) {
     set.joinCodeHash = patch.join_code ? await sha256hex(normJoinCode(patch.join_code)) : null;
   }

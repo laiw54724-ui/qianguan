@@ -24,6 +24,8 @@ export const projects = sqliteTable('projects', {
   isVerified: integer('is_verified', { mode: 'boolean' }).notNull().default(false),
   announcement: text('announcement'),
   fieldSchema: text('field_schema', { mode: 'json' }).$defaultFn(() => []), // JSON: FieldDef[]
+  tagGroups: text('tag_groups', { mode: 'json' }).$defaultFn(() => []), // JSON: TagGroup[]
+  links: text('links', { mode: 'json' }).$defaultFn(() => []), // JSON: SocialLink[]
   rev: integer('rev').notNull().default(1), // §7 快取版本號預留
   createdAt: integer('created_at').notNull(),
   updatedAt: integer('updated_at').notNull(),
@@ -41,6 +43,8 @@ export const characters = sqliteTable(
     avatarUrl: text('avatar_url'),
     profile: text('profile', { mode: 'json' }).$defaultFn(() => ({})), // JSON：彈性欄位，不要 EAV
     blocks: text('blocks', { mode: 'json' }).$defaultFn(() => []), // JSON: WorldBlock[]
+    links: text('links', { mode: 'json' }).$defaultFn(() => []), // JSON: SocialLink[]
+    tags: text('tags', { mode: 'json' }).$defaultFn(() => []), // JSON: string[]
     editTokenHash: text('edit_token_hash').notNull(),
     discordId: text('discord_id'), // §4.4 預留
     status: text('status').notNull().default('active'), // active|draft|removed（draft＝完成前不公開，§12）

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { acceptedRelations, FEED_LIMIT, feed, getProject, listCharacters } from '../lib/api';
 
 import { href, timeAgo } from '../lib/nav';
-import { PageLoading, BlockView, SiteHeader, CharAvatar, EmptyNote, PreviewModal, ThreadLink, type PreviewTarget, type RosterLite } from '../components/kg';
+import { PageLoading, BlockView, FilterChips, SiteHeader, CharAvatar, EmptyNote, PreviewModal, ThreadLink, type PreviewTarget, type RosterLite } from '../components/kg';
+import { SocialLinkChips } from '../components/links';
 import type { Character, KgEvent, Project } from '../lib/types';
 
 // 名字一定要帶頭像（行內小頭像 + 粗體名字）
@@ -140,6 +141,8 @@ export default function ProjectPage({ slug }: { slug: string }) {
   const [mineHere, setMineHere] = useState<string[]>([]);
   const [isOwner, setIsOwner] = useState(false);
   const [preview, setPreview] = useState<{ block: PreviewTarget; idx: number } | null>(null);
+  const [filterTag, setFilterTag] = useState('');
+  const [qaFilter, setQaFilter] = useState('');
 
   const loadFeed = useCallback(
     async (before?: number) => {
@@ -175,6 +178,24 @@ export default function ProjectPage({ slug }: { slug: string }) {
 
   const charMap = useMemo(() => new Map(chars.map((c) => [c.id, c])), [chars]);
   const rosterLite: RosterLite[] = useMemo(() => chars.map((c) => ({ id: c.id, name: c.name, avatar_url: c.avatar_url })), [chars]);
+  const vocab = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of project?.tag_groups ?? []) g.tags.forEach((t) => set.add(t));
+    for (const c of chars) (c.tags ?? []).forEach((t) => set.add(t));
+    return [...set];
+  }, [project, chars]);
+  const qaTags = useMemo(
+    () => [...new Set((project?.qa ?? []).flatMap((q) => q.tags ?? []))],
+    [project],
+  );
+  const shownChars = useMemo(
+    () => (filterTag ? chars.filter((c) => (c.tags ?? []).includes(filterTag)) : chars),
+    [chars, filterTag],
+  );
+  const shownQa = useMemo(
+    () => (qaFilter ? project?.qa.filter((q) => (q.tags ?? []).includes(qaFilter)) ?? [] : project?.qa ?? []),
+    [project, qaFilter],
+  );
 
   if (project === undefined) return (
     <div className="min-h-screen flex flex-col">
@@ -227,6 +248,9 @@ export default function ProjectPage({ slug }: { slug: string }) {
               </div>
               <h1 className="font-logo text-5xl leading-tight">{project.title}</h1>
               {project.summary && <p className="mt-4 text-[#4a3b31] leading-relaxed">{project.summary}</p>}
+              <div className="mt-4">
+                <SocialLinkChips links={project.links} />
+              </div>
 
               <div className="font-mono2 text-xs text-[#6f6156] mt-5 space-y-1">
                 <div>{chars.length} 位角色 ・ {relCount} 條已牽成</div>
@@ -301,13 +325,29 @@ export default function ProjectPage({ slug }: { slug: string }) {
         {project.qa.length > 0 && (
           <section id="qa" className="scroll-mt-24 mt-16 kg-rise">
             <h2 className="font-huninn text-2xl mb-5">常見問答</h2>
+            <FilterChips
+              groups={(project.tag_groups ?? []).map((g) => ({
+                ...g,
+                tags: g.tags.filter((t) => qaTags.includes(t)),
+              }))}
+              tags={qaTags}
+              value={qaFilter}
+              onChange={setQaFilter}
+            />
             <div className="space-y-3.5">
-              {project.qa.map((item) => (
+              {shownQa.map((item) => (
                 <div key={item.id} className="kg-card-flat p-5">
                   <div className="flex gap-3">
                     <span className="font-logo text-[#9e4b2c] text-lg leading-none shrink-0 w-6">Q</span>
                     <div className="font-bold leading-relaxed">{item.q}</div>
                   </div>
+                  {(item.tags ?? []).length > 0 && (
+                    <div className="flex flex-wrap gap-1 mt-2 pl-9">
+                      {item.tags!.map((t) => (
+                        <span key={t} className="kg-tag">{t}</span>
+                      ))}
+                    </div>
+                  )}
                   <div className="flex gap-3 mt-3 pt-3 border-t border-dashed border-[#e8dfd4]">
                     <span className="font-logo text-[#24697f] text-lg leading-none shrink-0 w-6">A</span>
                     <div className="text-[15px] text-[#4a3b31] leading-loose whitespace-pre-wrap">{item.a || <span className="text-[#7a6f63]">（還沒有回答）</span>}</div>
@@ -321,30 +361,45 @@ export default function ProjectPage({ slug }: { slug: string }) {
         {/* 名單 */}
         <section id="roster" className="scroll-mt-24 mt-16 kg-rise">
           <h2 className="font-huninn text-2xl mb-5">名單</h2>
-          {chars.length === 0 ? (
-            <EmptyNote>還沒有角色——成為第一個登船的人吧。</EmptyNote>
+          <FilterChips groups={project.tag_groups} tags={vocab} value={filterTag} onChange={setFilterTag} />
+          {shownChars.length === 0 ? (
+            <EmptyNote>{filterTag ? '這個分類還沒有角色。' : '還沒有角色——成為第一個登船的人吧。'}</EmptyNote>
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-3.5">
-              {chars.map((c) => (
-                <a
-                  key={c.id}
-                  href={href(`/p/${slug}/c/${c.id}`)}
-                  className="kg-card p-4 flex gap-3 items-start hover:-translate-y-1 transition-transform"
-                >
-                  <CharAvatar name={c.name} url={c.avatar_url} size={46} />
-                  <div className="min-w-0">
-                    <div className="font-bold flex items-center gap-2 flex-wrap">
-                      {c.name}
-                      <span className="font-mono2 text-[10px] text-[#6f6156] font-normal">{c.id}</span>
-                      {c.status === 'draft' && (
-                        <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
-                          草稿
-                        </span>
+              {shownChars.map((c) => (
+                <div key={c.id} className="kg-card p-4">
+                  <a
+                    href={href(`/p/${slug}/c/${c.id}`)}
+                    className="flex gap-3 items-start hover:-translate-y-1 transition-transform"
+                  >
+                    <CharAvatar name={c.name} url={c.avatar_url} size={46} />
+                    <div className="min-w-0">
+                      <div className="font-bold flex items-center gap-2 flex-wrap">
+                        {c.name}
+                        <span className="font-mono2 text-[10px] text-[#6f6156] font-normal">{c.id}</span>
+                        {c.slot && (
+                          <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
+                            空位
+                          </span>
+                        )}
+                        {!c.slot && c.status === 'draft' && (
+                          <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
+                            草稿
+                          </span>
+                        )}
+                      </div>
+                      {c.one_liner && <p className="text-sm text-[#6f6156] mt-0.5 line-clamp-2 leading-relaxed">{c.one_liner}</p>}
+                      {(c.tags ?? []).length > 0 && (
+                        <div className="flex flex-wrap gap-1 mt-1.5">
+                          {(c.tags ?? []).map((t) => (
+                            <span key={t} className="kg-tag">{t}</span>
+                          ))}
+                        </div>
                       )}
                     </div>
-                    {c.one_liner && <p className="text-sm text-[#6f6156] mt-0.5 line-clamp-2 leading-relaxed">{c.one_liner}</p>}
-                  </div>
-                </a>
+                  </a>
+                  <SocialLinkChips links={c.links} compact />
+                </div>
               ))}
             </div>
           )}

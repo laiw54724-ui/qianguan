@@ -1,9 +1,28 @@
 import { useEffect, useRef, useState } from 'react';
 import { getCharacter, listCharacters, updateCharacter, verifyCharToken, type CharacterView } from '../lib/api';
-import { href, navigate } from '../lib/nav';
+import { href } from '../lib/nav';
 import { clearBuffer, loadBuffer, saveBuffer, useLeaveGuard } from '../lib/dirty';
-import { BlocksEditor, ErrorBox, FieldInput, ImageField, PageLoading, SecLabel, SiteFooter, SiteHeader, TokenGate, toast, type RosterLite } from '../components/kg';
+import {
+  BlocksEditor,
+  ErrorBox,
+  FillSection,
+  ImageField,
+  ImeInput,
+  PageLoading,
+  SecLabel,
+  SheetableField,
+  SiteFooter,
+  SiteHeader,
+  StickySaveBar,
+  TagPicker,
+  TokenGate,
+  toast,
+  type BlockEditorMode,
+  type RosterLite,
+} from '../components/kg';
+import { SocialLinksEditor } from '../components/links';
 import { fieldHasContent } from '../lib/fvals';
+import { sanitizeLinks, type SocialLink } from '../lib/links';
 import type { WorldBlock } from '../lib/types';
 
 const BUF_KEY = (charId: string) => `draft_${charId}`; // kg_buf_draft_<charId>，對齊規格 §12 的 kg_draft_<charId> 語意
@@ -14,6 +33,8 @@ interface FormState {
   avatarUrl: string;
   profile: Record<string, string>;
   blocks: WorldBlock[];
+  links: SocialLink[];
+  tags: string[];
 }
 
 export default function CharEditPage({ slug, charId }: { slug: string; charId: string }) {
@@ -29,19 +50,27 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
   const [avatarUrl, setAvatarUrl] = useState('');
   const [profile, setProfile] = useState<Record<string, string>>({});
   const [blocks, setBlocks] = useState<WorldBlock[]>([]);
+  const [links, setLinks] = useState<SocialLink[]>([]);
+  const [tags, setTags] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [restorable, setRestorable] = useState<FormState | null>(null);
+  const [draftNotice, setDraftNotice] = useState(false);
+  const [mode, setMode] = useState<BlockEditorMode>('fill');
+  const [sec, setSec] = useState<'links' | 'fields' | 'tags' | ''>('fields');
+  const [seedOpen, setSeedOpen] = useState<string | null>(null);
   const snapshot = useRef('');
+  const serverForm = useRef<FormState | null>(null);
 
-  const currentForm = (): FormState => ({ name, oneLiner, avatarUrl, profile, blocks });
+  const currentForm = (): FormState => ({ name, oneLiner, avatarUrl, profile, blocks, links, tags });
 
-  const applyChar = (c: { name: string; one_liner: string; avatar_url: string | null; profile: Record<string, string>; blocks: WorldBlock[] }) => {
+  const applyChar = (c: { name: string; one_liner: string; avatar_url: string | null; profile: Record<string, string>; blocks: WorldBlock[]; links?: SocialLink[]; tags?: string[] }) => {
     setName(c.name);
     setOneLiner(c.one_liner);
     setAvatarUrl(c.avatar_url ?? '');
     setProfile({ ...c.profile });
     setBlocks(c.blocks ?? []);
+    setLinks(c.links ?? []);
+    setTags(c.tags ?? []);
   };
 
   const dirty = authed && snapshot.current !== '' && snapshot.current !== JSON.stringify(currentForm());
@@ -54,13 +83,25 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
       const ok = await verifyCharToken(slug, charId); // cookie 優先
       if (ok) {
         setAuthed(true);
+        const snap: FormState = {
+          name: ok.name, oneLiner: ok.one_liner, avatarUrl: ok.avatar_url ?? '', profile: ok.profile, blocks: ok.blocks ?? [], links: ok.links ?? [], tags: ok.tags ?? [],
+        };
+        serverForm.current = snap;
+        snapshot.current = JSON.stringify(snap);
         applyChar(ok);
-        snapshot.current = JSON.stringify({
-          name: ok.name, oneLiner: ok.one_liner, avatarUrl: ok.avatar_url ?? '', profile: ok.profile, blocks: ok.blocks ?? [],
-        });
-        // 本機復原緩衝：比伺服器新就問（§12-6）
         const buf = loadBuffer<FormState>(BUF_KEY(charId));
-        if (buf && buf.savedAt > ok.updated_at) setRestorable(buf.data);
+        if (buf && buf.savedAt > ok.updated_at) {
+          applyChar({
+            name: buf.data.name,
+            one_liner: buf.data.oneLiner,
+            avatar_url: buf.data.avatarUrl,
+            profile: buf.data.profile,
+            blocks: buf.data.blocks,
+            links: buf.data.links,
+            tags: buf.data.tags,
+          });
+          setDraftNotice(true);
+        }
       }
       const cs = await listCharacters(slug);
       setRoster(cs.filter((c) => c.id !== charId).map((c) => ({ id: c.id, name: c.name, avatar_url: c.avatar_url })));
@@ -75,7 +116,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
     const t = window.setInterval(() => saveBuffer(BUF_KEY(charId), currentForm()), 3000);
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, name, oneLiner, avatarUrl, profile, blocks]);
+  }, [dirty, name, oneLiner, avatarUrl, profile, blocks, links, tags]);
 
   const doSave = async (): Promise<boolean> => {
     if (!data) return false;
@@ -83,6 +124,12 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
     if (!name.trim()) {
       setError('請填角色名稱');
       return false;
+    }
+    for (const g of data.project.tag_groups ?? []) {
+      if (g.required && !g.tags.some((t) => tags.includes(t))) {
+        setError(`請選擇「${g.name}」`);
+        return false;
+      }
     }
     for (const f of data.project.field_schema) {
       if (f.required && !(profile[f.key] ?? '').trim()) {
@@ -97,6 +144,8 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
         one_liner: oneLiner.trim(),
         avatar_url: avatarUrl.trim(),
         profile,
+        tags,
+        links: sanitizeLinks(links),
         blocks: blocks
           .map((b) => ({ ...b, title: b.title.trim() }))
           .filter((b) => b.title || b.fields.some((f) => fieldHasContent(f.type, f.content, f.images))),
@@ -107,6 +156,8 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
       }
       clearBuffer(BUF_KEY(charId));
       snapshot.current = JSON.stringify(currentForm());
+      serverForm.current = currentForm();
+      setDraftNotice(false);
       toast('✓ 已儲存，角色頁現在是新內容');
       const got = await getCharacter(slug, charId);
       if (got) setData(got);
@@ -150,7 +201,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
         <main className="flex-1 px-4 sm:px-6 py-16">
           <TokenGate
             title={`編輯「${data.character.name}」`}
-            hint="需要角色編輯碼。若你換了瀏覽器或清掉了資料，貼上當初保存的 chr_ 權杖即可救回角色。"
+            hint="貼上主辦或你自己保存的那串編輯碼。這台裝置驗證過就會記住。"
             token={gateToken}
             setToken={setGateToken}
             busy={gateBusy}
@@ -177,26 +228,26 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
   return (
     <div className="min-h-screen flex flex-col">
       <SiteHeader />
-      <main className="mx-auto max-w-2xl px-4 sm:px-6 py-14 w-full">
+      <main className="kg-form-page mx-auto max-w-2xl px-4 sm:px-6 py-10 w-full">
         <a href={href(`/p/${slug}/c/${charId}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← 回角色頁
         </a>
-        <div className="mt-4 mb-8">
+        <div className="mt-4 mb-6">
           <div className="flex flex-wrap items-center gap-3">
             <SecLabel>編輯角色</SecLabel>
-            <div className="ml-auto flex items-center gap-2.5">
-              {dirty && (
-                <span className="kg-tag" style={{ background: '#f6efe4', color: '#9e4b2c' }}>
-                  ● 有未儲存的變更
-                </span>
-              )}
-              <button type="button" className="kg-pill kg-pill-red" disabled={!dirty || busy} onClick={doSave}>
-                {busy ? '儲存中…' : '儲存'}
+            <div className="kg-seg ml-auto" role="tablist" aria-label="編輯模式">
+              <button type="button" role="tab" aria-selected={mode === 'fill'} aria-pressed={mode === 'fill'} onClick={() => setMode('fill')}>
+                填寫
+              </button>
+              <button type="button" role="tab" aria-selected={mode === 'schema'} aria-pressed={mode === 'schema'} onClick={() => setMode('schema')}>
+                組版
               </button>
             </div>
           </div>
-          <h1 className="font-display font-black text-4xl mt-2">{data.character.name}</h1>
-          <p className="font-mono2 text-[11px] text-[#6f6156] mt-1.5">變更只存在這個瀏覽器，按「儲存」才對所有人生效；離開前會問你要不要儲存。</p>
+          <h1 className="font-display font-black text-4xl mt-2">{name || data.character.name}</h1>
+          <p className="font-mono2 text-[11px] text-[#6f6156] mt-1.5">
+            {mode === 'fill' ? '只填已有欄位。要加區塊或改型別，點「組版」。' : '加區塊、改型別、排序。填內容請回到「填寫」。'}
+          </p>
         </div>
 
         {data.character.status === 'draft' && (
@@ -205,83 +256,142 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
           </div>
         )}
 
-        {restorable && (
-          <div className="kg-card-flat p-4 mb-6 flex flex-wrap items-center gap-3" style={{ background: '#7fc0dc22' }}>
-            <span className="text-sm font-bold">上次有未儲存的變更，要復原嗎？</span>
+        {draftNotice && (
+          <div className="kg-card-flat p-3 mb-6 flex flex-wrap items-center gap-3" style={{ background: '#7fc0dc22' }}>
+            <span className="text-sm font-bold">已還原本機未儲存的草稿</span>
             <button
               type="button"
-              className="kg-pill kg-pill-sm"
+              className="kg-pill kg-pill-ghost kg-pill-sm min-h-10"
               onClick={() => {
-                applyChar({ name: restorable.name, one_liner: restorable.oneLiner, avatar_url: restorable.avatarUrl, profile: restorable.profile, blocks: restorable.blocks });
-                setRestorable(null);
-              }}
-            >
-              復原
-            </button>
-            <button
-              type="button"
-              className="kg-pill kg-pill-ghost kg-pill-sm"
-              onClick={() => {
+                const s = serverForm.current;
+                if (!s) return;
+                applyChar({
+                  name: s.name,
+                  one_liner: s.oneLiner,
+                  avatar_url: s.avatarUrl,
+                  profile: s.profile,
+                  blocks: s.blocks,
+                  links: s.links,
+                  tags: s.tags,
+                });
+                snapshot.current = JSON.stringify(s);
                 clearBuffer(BUF_KEY(charId));
-                setRestorable(null);
+                setDraftNotice(false);
               }}
             >
-              捨棄
+              改回上次儲存
             </button>
           </div>
         )}
 
-        <div className="kg-card p-6 sm:p-8 space-y-5 kg-rise">
-          <div className="grid sm:grid-cols-2 gap-5 items-start">
-            <div>
-              <label htmlFor="fld-CharEdit-1" className="kg-label">
-                角色名稱 <span className="req">*</span>
-              </label>
-              <input id="fld-CharEdit-1" className="kg-input" value={name} onChange={(e) => setName(e.target.value)} maxLength={30} />
-            </div>
-            <ImageField label="頭像" value={avatarUrl} onChange={setAvatarUrl} square />
-          </div>
-          <div>
-            <label htmlFor="fld-CharEdit-2" className="kg-label">一句話介紹</label>
-            <input id="fld-CharEdit-2" className="kg-input" value={oneLiner} onChange={(e) => setOneLiner(e.target.value)} maxLength={80} />
-          </div>
-
-          <hr className="kg-hr" />
-          <div className="kg-seclabel">（企劃自訂欄位）</div>
-          <div className="grid sm:grid-cols-2 gap-5">
-            {project.field_schema.map((f) => (
-              <div key={f.key} className={['textarea', 'tags', 'multiselect', 'checklist', 'radar', 'timeline', 'calendar', 'palette', 'image', 'audio', 'video', 'charref'].includes(f.type ?? 'text') ? 'sm:col-span-2' : ''}>
-                <label className="kg-label" htmlFor={`pf-${f.key}`}>
-                  {f.label} {f.required && <span className="req">*</span>}
-                  {(f.visibility ?? 'public') === 'private' && (
-                    <span className="ml-1.5 font-mono2 text-[10px] text-[#a8455e] font-normal">🔒 私人・僅本人與開設者可見</span>
-                  )}
-                </label>
-                <FieldInput id={`pf-${f.key}`} def={f} value={profile[f.key] ?? ''} onChange={(v) => setProfile({ ...profile, [f.key]: v })} roster={roster} />
+        {mode === 'fill' ? (
+          <div className="space-y-3 kg-rise">
+            <div className="kg-card-flat p-4">
+              <div className="flex gap-3 items-start">
+                <div className="shrink-0">
+                  <ImageField label="頭像" value={avatarUrl} onChange={setAvatarUrl} square />
+                </div>
+                <div className="flex-1 min-w-0 space-y-3">
+                  <div>
+                    <label htmlFor="fld-CharEdit-1" className="kg-label">
+                      角色名稱 <span className="req">*</span>
+                    </label>
+                    <ImeInput id="fld-CharEdit-1" className="kg-input" value={name} onChange={setName} maxLength={30} />
+                  </div>
+                  <div>
+                    <label htmlFor="fld-CharEdit-2" className="kg-label">一句話介紹</label>
+                    <ImeInput id="fld-CharEdit-2" className="kg-input" value={oneLiner} onChange={setOneLiner} placeholder="名單上顯示的一行" maxLength={80} />
+                  </div>
+                </div>
               </div>
-            ))}
-          </div>
+            </div>
 
-          <hr className="kg-hr" />
-          <div>
-            <div className="kg-seclabel">（角色卡區塊）</div>
-            <p className="text-sm text-[#6f6156] mt-2 mb-4 leading-relaxed">
-              一個區塊裡可以放多個欄位，各自選型別（文字、標籤、核取清單、五維雷達、時間線、行事曆、色票、圖片相簿、PDF、音樂、影片、關聯角色…）。新增區塊可從模板開始；每個區塊都有「預覽」可以看到顯示效果。
+            {(project.tag_groups ?? []).length > 0 && (
+              <FillSection
+                title="分類"
+                meta={`${tags.length}`}
+                open={sec === 'tags'}
+                onToggle={() => setSec(sec === 'tags' ? '' : 'tags')}
+              >
+                <TagPicker groups={project.tag_groups ?? []} value={tags} onChange={setTags} />
+              </FillSection>
+            )}
+
+            <FillSection
+              title="連結"
+              meta={`${sanitizeLinks(links).length}`}
+              open={sec === 'links'}
+              onToggle={() => setSec(sec === 'links' ? '' : 'links')}
+            >
+              <SocialLinksEditor value={links} onChange={setLinks} hideIntro />
+            </FillSection>
+
+            {project.field_schema.length > 0 && (
+              <FillSection
+                title="企劃欄位"
+                meta={`${project.field_schema.filter((f) => fieldHasContent(f.type ?? 'text', profile[f.key] ?? '')).length}/${project.field_schema.length}`}
+                open={sec === 'fields'}
+                onToggle={() => setSec(sec === 'fields' ? '' : 'fields')}
+              >
+                {project.field_schema.map((f) => (
+                  <div key={f.key}>
+                    <label className="kg-label" htmlFor={`pf-${f.key}`}>
+                      {f.label} {f.required && <span className="req">*</span>}
+                      {(f.visibility ?? 'public') === 'private' && (
+                        <span className="ml-1.5 font-mono2 text-[10px] text-[#a8455e] font-normal">🔒 私人</span>
+                      )}
+                    </label>
+                    <SheetableField
+                      id={`pf-${f.key}`}
+                      def={f}
+                      value={profile[f.key] ?? ''}
+                      onChange={(v) => setProfile({ ...profile, [f.key]: v })}
+                      roster={roster}
+                    />
+                  </div>
+                ))}
+              </FillSection>
+            )}
+
+            <div className="pt-1">
+              <div className="kg-seclabel mb-2">（角色卡）</div>
+              <BlocksEditor
+                value={blocks}
+                onChange={setBlocks}
+                roster={roster}
+                slug={slug}
+                mode="fill"
+                variant="character"
+                seedOpenId={seedOpen}
+                onRequestSchema={() => setMode('schema')}
+              />
+            </div>
+
+            {error && <ErrorBox>{error}</ErrorBox>}
+          </div>
+        ) : (
+          <div className="space-y-4 kg-rise">
+            <p className="text-sm text-[#6f6156] leading-relaxed">
+              從模板加一塊，或空白開始。加完會回到填寫。填內容請回到「填寫」。
             </p>
-            <BlocksEditor value={blocks} onChange={setBlocks} roster={roster} slug={slug} />
+            <BlocksEditor
+              value={blocks}
+              onChange={setBlocks}
+              roster={roster}
+              slug={slug}
+              mode="schema"
+              variant="character"
+              onAdded={(id) => {
+                setSeedOpen(id);
+                setMode('fill');
+              }}
+            />
+            {error && <ErrorBox>{error}</ErrorBox>}
           </div>
-
-          {error && <ErrorBox>{error}</ErrorBox>}
-
-          <div className="flex gap-3 items-center">
-            <p className="text-xs text-[#6f6156] leading-relaxed flex-1">內容在按「儲存」前不會離開這個瀏覽器。</p>
-            <button type="button" className="kg-pill kg-pill-ghost shrink-0" onClick={() => navigate(`/p/${slug}/c/${charId}`)}>
-              回角色頁
-            </button>
-          </div>
-        </div>
+        )}
       </main>
       <SiteFooter />
+      <StickySaveBar dirty={dirty} busy={busy} onSave={() => { void doSave(); }} />
     </div>
   );
 }

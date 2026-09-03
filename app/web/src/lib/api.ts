@@ -1,7 +1,8 @@
 // 唯一的 fetch 封裝 — 對外暴露與原型 lib/store.ts 完全相同的函式名與參數，元件層不用改。
 // 規格 §6.3：所有 mutation 統一在這裡帶 X-KG: 1 自訂標頭；任何元件不得自己呼叫 fetch。
 // 權杖走 httpOnly cookie（credentials: 'same-origin'）；貼碼救援時把 token 放 body，後端驗過會順手種 cookie。
-import type { Character, FieldDef, JoinMode, KgEvent, Project, Relation, RelationExtra, Visibility, WorldBlock } from './types';
+import type { Character, FieldDef, JoinMode, KgEvent, Project, Relation, RelationExtra, TagGroup, Visibility, WorldBlock } from './types';
+import type { SocialLink } from './links';
 
 const BASE = '/api';
 
@@ -60,6 +61,7 @@ export interface NewProjectInput {
   join_mode: JoinMode;
   join_code?: string;
   turnstile?: string; // Turnstile token（§6.6）
+  links?: SocialLink[];
 }
 
 export async function listPublicProjects(): Promise<Project[]> {
@@ -68,6 +70,14 @@ export async function listPublicProjects(): Promise<Project[]> {
 
 export async function findSimilarProjects(title: string): Promise<Project[]> {
   return req<Project[]>('GET', `/projects/similar?title=${encodeURIComponent(title)}`);
+}
+
+export async function fetchLinkPreview(url: string): Promise<{ title: string }> {
+  try {
+    return await req<{ title: string }>('GET', `/link-preview?url=${encodeURIComponent(url)}`);
+  } catch {
+    return { title: '' };
+  }
 }
 
 export async function createProject(input: NewProjectInput): Promise<{ project: Project; ownerToken: string }> {
@@ -104,8 +114,10 @@ export interface ProjectPatch {
   join_code?: string; // 明文只在這次請求出現；後端立即雜湊（§12：不再有發布時才雜湊）
   signups_open: boolean;
   world_blocks: WorldBlock[];
-  qa: { id: string; q: string; a: string }[];
+  qa: { id: string; q: string; a: string; tags?: string[] }[];
   field_schema: FieldDef[];
+  tag_groups?: TagGroup[];
+  links?: SocialLink[];
   expected_rev?: number; // §7 樂觀鎖：帶目前讀到的 rev，後端偵測到別人已經更新過會回衝突而不是靜默覆蓋
 }
 
@@ -134,6 +146,9 @@ export interface JoinInput {
   avatar_url: string;
   profile: Record<string, string>;
   blocks?: WorldBlock[];
+  links?: SocialLink[];
+  tags?: string[];
+  claim_id?: string;
   join_code?: string;
   turnstile?: string;
 }
@@ -181,6 +196,8 @@ export interface CharacterPatch {
   avatar_url: string;
   profile: Record<string, string>;
   blocks?: WorldBlock[];
+  links?: SocialLink[];
+  tags?: string[];
 }
 
 export async function updateCharacter(slug: string, charId: string, _token: string, patch: CharacterPatch): Promise<Result> {

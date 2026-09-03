@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { acceptedRelations, getCharacter, listCharacters, sideOf, verifyCharToken, type CharacterView } from '../lib/api';
 import { href } from '../lib/nav';
 import { PageLoading, BlockView, CharAvatar, EmptyNote, ErrorBox, FieldView, PreviewModal, SecLabel, SiteFooter, SiteHeader, ThreadLink, type PreviewTarget, type RosterLite } from '../components/kg';
+import { SocialLinkChips } from '../components/links';
 import type { Character, Relation } from '../lib/types';
 
 export default function CharacterPage({ slug, charId }: { slug: string; charId: string }) {
@@ -89,13 +90,28 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="font-huninn text-4xl">{character.name}</h1>
               <span className="font-mono2 text-xs text-[#6f6156]">{character.id}</span>
-              {character.status === 'draft' && (
+              {character.slot && (
+                <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
+                  空位・等人加入
+                </span>
+              )}
+              {!character.slot && character.status === 'draft' && (
                 <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
                   草稿・待認領
                 </span>
               )}
             </div>
             {character.one_liner && <p className="mt-2 text-lg text-[#4a3b31] leading-relaxed">{character.one_liner}</p>}
+            {(character.tags ?? []).length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mt-2">
+                {(character.tags ?? []).map((t) => (
+                  <span key={t} className="kg-tag">{t}</span>
+                ))}
+              </div>
+            )}
+            <div className="mt-3">
+              <SocialLinkChips links={character.links} />
+            </div>
             <div className="flex flex-wrap gap-2.5 mt-4">
               {owned ? (
                 <>
@@ -106,6 +122,10 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
                     牽線管理
                   </a>
                 </>
+              ) : character.slot ? (
+                <a href={href(`/p/${slug}/join?claim=${encodeURIComponent(character.name)}`)} className="kg-pill kg-pill-sm kg-pill-red">
+                  用「{character.name}」加入以認領
+                </a>
               ) : (
                 <button type="button" className="kg-pill kg-pill-sm kg-pill-ghost" onClick={() => setClaimOpen((v) => !v)}>
                   這是我的角色

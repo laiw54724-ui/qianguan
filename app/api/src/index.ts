@@ -18,6 +18,7 @@ import * as projectSvc from './services/project';
 import * as charSvc from './services/character';
 import * as relSvc from './services/relation';
 import * as eventSvc from './services/event';
+import { fetchPageTitle } from './services/preview';
 
 type Bindings = {
   DB: D1Database;
@@ -84,6 +85,16 @@ const ts = (c: Ctx, token?: string) =>
 // ================= 公開端點 =================
 
 app.get('/api/projects', async (c) => c.json(await projectSvc.listPublicProjects(db(c))));
+
+app.get('/api/link-preview', async (c) => {
+  const url = (c.req.query('url') ?? '').trim();
+  if (!url) return c.json({ title: '' });
+  // GET 不走 mutation 節流，這裡單獨擋一下以免被拿去當開放 proxy
+  const ip = c.req.header('CF-Connecting-IP') ?? 'unknown';
+  const { success } = await c.env.RATE_LIMITER.limit({ key: `preview:${ip}` });
+  if (!success) return c.json({ error: '操作太頻繁，請稍後再試' }, 429);
+  return c.json(await fetchPageTitle(url));
+});
 
 app.get('/api/projects/similar', async (c) =>
   c.json(await projectSvc.findSimilarProjects(db(c), c.req.query('title') ?? '')));

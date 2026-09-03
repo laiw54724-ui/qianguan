@@ -5,19 +5,26 @@ import { clearBuffer, loadBuffer, saveBuffer, useLeaveGuard } from '../lib/dirty
 import {
   BlocksEditor,
   CharAvatar,
+  ChoiceSeg,
   ErrorBox,
   FieldsEditor,
   ImageField,
+  ImeInput,
   PageLoading,
   QaEditor,
   SecLabel,
   SiteFooter,
   SiteHeader,
+  StickySaveBar,
+  TagGroupEditor,
   TokenGate,
   toast,
+  type BlockEditorMode,
 } from '../components/kg';
 import { fieldHasContent } from '../lib/fvals';
-import type { FieldDef, Project, QaItem, WorldBlock } from '../lib/types';
+import { SocialLinksEditor } from '../components/links';
+import { sanitizeLinks, type SocialLink } from '../lib/links';
+import type { FieldDef, Project, QaItem, TagGroup, WorldBlock } from '../lib/types';
 
 const BUF_KEY = (slug: string) => `pbuf_${slug}`;
 
@@ -33,6 +40,8 @@ interface FormState {
   worldBlocks: WorldBlock[];
   qa: QaItem[];
   fields: FieldDef[];
+  tagGroups: TagGroup[];
+  links: SocialLink[];
 }
 
 export default function ManagePage({ slug }: { slug: string }) {
@@ -54,6 +63,11 @@ export default function ManagePage({ slug }: { slug: string }) {
   const [worldBlocks, setWorldBlocks] = useState<WorldBlock[]>([]);
   const [qa, setQa] = useState<QaItem[]>([]);
   const [fields, setFields] = useState<FieldDef[]>([]);
+  const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
+  const [links, setLinks] = useState<SocialLink[]>([]);
+  const [worldMode, setWorldMode] = useState<BlockEditorMode>('fill');
+  const [tab, setTab] = useState<'info' | 'world' | 'fields' | 'tags' | 'roster'>('info');
+  const [seedOpen, setSeedOpen] = useState<string | null>(null);
 
   const [rows, setRows] = useState<RosterRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -61,7 +75,7 @@ export default function ManagePage({ slug }: { slug: string }) {
   const snapshot = useRef(''); // 上次載入/儲存時的狀態指纹
 
   const currentForm = (): FormState => ({
-    title, summary, coverUrl, iconUrl, visibility, joinMode, joinCode, signupsOpen, worldBlocks, qa, fields,
+    title, summary, coverUrl, iconUrl, visibility, joinMode, joinCode, signupsOpen, worldBlocks, qa, fields, tagGroups, links,
   });
 
   const applyProject = (p: Project) => {
@@ -76,6 +90,9 @@ export default function ManagePage({ slug }: { slug: string }) {
     setWorldBlocks(p.world_blocks);
     setQa(p.qa);
     setFields(p.field_schema);
+    setTagGroups(p.tag_groups ?? []);
+    setLinks(p.links ?? []);
+    setWorldMode(p.world_blocks.length ? 'fill' : 'schema');
   };
 
   const dirty = authed && snapshot.current !== '' && snapshot.current !== JSON.stringify({ ...currentForm(), joinCode: '' });
@@ -98,7 +115,7 @@ export default function ManagePage({ slug }: { slug: string }) {
         snapshot.current = JSON.stringify({ ...({
           title: ok.title, summary: ok.summary, coverUrl: ok.cover_url ?? '', iconUrl: ok.icon_url ?? '',
           visibility: ok.visibility, joinMode: ok.join_mode, joinCode: '', signupsOpen: ok.signups_open,
-          worldBlocks: ok.world_blocks, qa: ok.qa, fields: ok.field_schema,
+          worldBlocks: ok.world_blocks, qa: ok.qa, fields: ok.field_schema, tagGroups: ok.tag_groups ?? [], links: ok.links ?? [],
         }) });
         setRows(await rosterStats(slug));
         // 本機復原緩衝：比伺服器新就問（§12-6）
@@ -116,7 +133,7 @@ export default function ManagePage({ slug }: { slug: string }) {
     saveBuffer(BUF_KEY(slug), currentForm());
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [dirty, title, summary, coverUrl, iconUrl, visibility, joinMode, joinCode, signupsOpen, worldBlocks, qa, fields]);
+  }, [dirty, title, summary, coverUrl, iconUrl, visibility, joinMode, joinCode, signupsOpen, worldBlocks, qa, fields, tagGroups, links]);
 
   const doSave = async (): Promise<boolean> => {
     if (saving) return false;
@@ -141,6 +158,8 @@ export default function ManagePage({ slug }: { slug: string }) {
           .filter((b) => b.title || b.fields.some((f) => fieldHasContent(f.type, f.content, f.images))),
         qa: qa.map((x) => ({ ...x, q: x.q.trim(), a: x.a.trim() })).filter((x) => x.q && x.a),
         field_schema: fields.map((f) => ({ ...f, label: f.label.trim() })).filter((f) => f.label),
+        tag_groups: tagGroups.map((g) => ({ ...g, name: g.name.trim(), tags: g.tags.map((t) => t.trim()).filter(Boolean) })).filter((g) => g.name && g.tags.length),
+        links: sanitizeLinks(links),
         expected_rev: project?.rev,
       });
       if (!res.ok) {
@@ -206,7 +225,7 @@ export default function ManagePage({ slug }: { slug: string }) {
         <main className="flex-1 px-4 sm:px-6 py-16">
           <TokenGate
             title="開設者後台"
-            hint="需要開設者碼（own_…）。若換了瀏覽器，貼上建立企劃時保存的權杖即可進入。"
+            hint="貼上建立企劃時保存的開設者碼。這台裝置驗證過就會記住。"
             token={gateToken}
             setToken={setGateToken}
             busy={gateBusy}
@@ -232,28 +251,16 @@ export default function ManagePage({ slug }: { slug: string }) {
   return (
     <div className="min-h-screen flex flex-col">
       <SiteHeader />
-      <main className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
+      <main className="kg-form-page mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
         <a href={href(`/p/${slug}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← 回企劃頁
         </a>
-        <div className="mt-4 mb-3 kg-rise flex flex-wrap items-end gap-3">
-          <div>
-            <SecLabel>開設者後台</SecLabel>
-            <h1 className="font-huninn text-4xl mt-2">{project.title}</h1>
-          </div>
-          <div className="ml-auto flex items-center gap-2.5 pb-1">
-            {dirty && (
-              <span className="kg-tag" style={{ background: '#f6efe4', color: '#9e4b2c' }}>
-                ● 有未儲存的變更
-              </span>
-            )}
-            <button type="button" className="kg-pill kg-pill-red" disabled={!dirty || saving} onClick={doSave}>
-              {saving ? '儲存中…' : '儲存'}
-            </button>
-          </div>
+        <div className="mt-4 mb-3 kg-rise">
+          <SecLabel>開設者後台</SecLabel>
+          <h1 className="font-huninn text-4xl mt-2">{project.title}</h1>
         </div>
         <p className="text-sm text-[#6f6156] mb-8 leading-relaxed kg-rise">
-          變更只存在這個瀏覽器，按「儲存」才對所有人生效；離開頁面前會問你要不要儲存。
+          變更只存在這個瀏覽器，底欄按「儲存」才對所有人生效；離開頁面前會問你要不要儲存。
         </p>
 
         {restorable && (
@@ -266,7 +273,7 @@ export default function ManagePage({ slug }: { slug: string }) {
                 const r = restorable;
                 setTitle(r.title); setSummary(r.summary); setCoverUrl(r.coverUrl); setIconUrl(r.iconUrl);
                 setVisibility(r.visibility); setJoinMode(r.joinMode); setJoinCode(r.joinCode);
-                setSignupsOpen(r.signupsOpen); setWorldBlocks(r.worldBlocks); setQa(r.qa); setFields(r.fields);
+                setSignupsOpen(r.signupsOpen); setWorldBlocks(r.worldBlocks); setQa(r.qa); setFields(r.fields); setTagGroups(r.tagGroups ?? []); setLinks(r.links ?? []);
                 setRestorable(null);
               }}
             >
@@ -291,53 +298,68 @@ export default function ManagePage({ slug }: { slug: string }) {
           </div>
         )}
 
-        {/* 企劃資訊 */}
+        <div className="kg-seg kg-seg-grow mb-8" role="tablist" aria-label="後台分頁">
+          {(
+            [
+              ['info', '資訊'],
+              ['world', '世界'],
+              ['fields', '欄位'],
+              ['tags', '詞庫'],
+              ['roster', '名單'],
+            ] as const
+          ).map(([id, label]) => (
+            <button key={id} type="button" role="tab" aria-selected={tab === id} aria-pressed={tab === id} onClick={() => setTab(id)}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {tab === 'info' && (
         <section className="kg-card p-6 sm:p-8 space-y-5 kg-rise">
           <SecLabel>企劃資訊</SecLabel>
           <div>
             <label htmlFor="fld-Manage-1" className="kg-label">
               企劃名稱 <span className="req">*</span>
             </label>
-            <input id="fld-Manage-1" className="kg-input" value={title} onChange={(e) => setTitle(e.target.value)} maxLength={40} />
+            <ImeInput id="fld-Manage-1" className="kg-input" value={title} onChange={setTitle} maxLength={40} />
           </div>
           <div>
             <label htmlFor="fld-Manage-2" className="kg-label">一句話簡介</label>
-            <input id="fld-Manage-2" className="kg-input" value={summary} onChange={(e) => setSummary(e.target.value)} maxLength={80} />
+            <ImeInput id="fld-Manage-2" className="kg-input" value={summary} onChange={setSummary} maxLength={80} />
           </div>
-          <ImageField label="封面圖" value={coverUrl} onChange={setCoverUrl} hint="企劃頁頂部大圖，建議橫幅。" />
-          <ImageField label="企劃頭像" value={iconUrl} onChange={setIconUrl} hint="列表與頁首用的小方圖。" square />
-          <div className="grid sm:grid-cols-2 gap-5">
+          <div className="flex gap-3 items-start">
+            <div className="flex-1 min-w-0">
+              <ImageField label="封面圖" value={coverUrl} onChange={setCoverUrl} compact />
+            </div>
+            <div className="shrink-0">
+              <ImageField label="企劃頭像" value={iconUrl} onChange={setIconUrl} square compact />
+            </div>
+          </div>
+          <SocialLinksEditor value={links} onChange={setLinks} />
+          <div className="space-y-4">
             <div>
               <label className="kg-label">能見度</label>
-              <div className="space-y-2">
-                {(
-                  [
-                    ['unlisted', '未列出（不被索引）'],
-                    ['public', '公開（首頁列表）'],
-                  ] as const
-                ).map(([v, label]) => (
-                  <label key={v} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="radio" checked={visibility === v} onChange={() => setVisibility(v)} className="accent-[#9e4b2c]" />
-                    {label}
-                  </label>
-                ))}
-              </div>
+              <ChoiceSeg
+                ariaLabel="能見度"
+                value={visibility}
+                onChange={setVisibility}
+                options={[
+                  { value: 'unlisted', label: '未列出' },
+                  { value: 'public', label: '公開' },
+                ]}
+              />
             </div>
             <div>
               <label className="kg-label">加入方式</label>
-              <div className="space-y-2">
-                {(
-                  [
-                    ['open', '自由加入'],
-                    ['code', '需要加入碼'],
-                  ] as const
-                ).map(([v, label]) => (
-                  <label key={v} className="flex items-center gap-2 text-sm cursor-pointer">
-                    <input type="radio" checked={joinMode === v} onChange={() => setJoinMode(v)} className="accent-[#9e4b2c]" />
-                    {label}
-                  </label>
-                ))}
-              </div>
+              <ChoiceSeg
+                ariaLabel="加入方式"
+                value={joinMode}
+                onChange={setJoinMode}
+                options={[
+                  { value: 'open', label: '自由加入' },
+                  { value: 'code', label: '需要加入碼' },
+                ]}
+              />
               {joinMode === 'code' && (
                 <input
                   className="kg-input font-mono2 mt-3"
@@ -357,60 +379,73 @@ export default function ManagePage({ slug }: { slug: string }) {
             開放報名
           </label>
         </section>
+        )}
 
-        {/* 世界觀區塊 */}
-        <details className="kg-card kg-collapse p-6 sm:p-8 mt-10 kg-rise" style={{ animationDelay: '0.04s' }} open>
-          <summary className="cursor-pointer">
-            <div className="flex items-center gap-3">
-              <SecLabel>世界觀</SecLabel>
-              <span className="kg-chevron ml-auto text-[#6f6156]" aria-hidden="true">▾</span>
+        {tab === 'world' && (
+        <>
+        <section className="kg-rise">
+          <div className="flex flex-wrap items-center gap-3 mb-3">
+            <SecLabel>世界觀</SecLabel>
+            <div className="kg-seg ml-auto" role="tablist" aria-label="世界觀編輯模式">
+              <button type="button" role="tab" aria-selected={worldMode === 'fill'} aria-pressed={worldMode === 'fill'} onClick={() => setWorldMode('fill')}>
+                填寫
+              </button>
+              <button type="button" role="tab" aria-selected={worldMode === 'schema'} aria-pressed={worldMode === 'schema'} onClick={() => setWorldMode('schema')}>
+                組版
+              </button>
             </div>
-            <p className="text-sm text-[#6f6156] mt-2 leading-relaxed">
-              一個區塊裡可以放多個欄位，各自選型別：文字、標籤、核取清單、五維雷達、時間線、行事曆、色票、圖片相簿、PDF、音樂、影片、關聯角色等。新增區塊可從模板開始。
-            </p>
-          </summary>
-          <div className="mt-5">
-            <BlocksEditor
-              value={worldBlocks}
-              onChange={setWorldBlocks}
-              roster={rows.map((r) => ({ id: r.character.id, name: r.character.name, avatar_url: r.character.avatar_url }))}
-              slug={slug}
-            />
           </div>
-        </details>
+          <p className="text-sm text-[#6f6156] mb-4 leading-relaxed">
+            {worldMode === 'fill'
+              ? '點一章打開來填。要加章節或改欄位型別，點「組版」。'
+              : '用年表／地理／勢力／規則／用語／素材模板加一章。加完會回到填寫。'}
+          </p>
+          <BlocksEditor
+            value={worldBlocks}
+            onChange={setWorldBlocks}
+            roster={rows.map((r) => ({ id: r.character.id, name: r.character.name, avatar_url: r.character.avatar_url }))}
+            slug={slug}
+            variant="world"
+            mode={worldMode}
+            seedOpenId={seedOpen}
+            onRequestSchema={() => setWorldMode('schema')}
+            onAdded={(id) => {
+              setSeedOpen(id);
+              setWorldMode('fill');
+            }}
+          />
+        </section>
 
-        {/* QA */}
-        <details className="kg-card kg-collapse p-6 sm:p-8 mt-10 kg-rise" style={{ animationDelay: '0.08s' }} open>
-          <summary className="cursor-pointer">
-            <div className="flex items-center gap-3">
-              <SecLabel>問答 QA</SecLabel>
-              <span className="kg-chevron ml-auto text-[#6f6156]" aria-hidden="true">▾</span>
-            </div>
-            <p className="text-sm text-[#6f6156] mt-2 leading-relaxed">常見問題集，企劃頁的「問答」區會在至少有一題時出現。</p>
-          </summary>
-          <div className="mt-5">
-            <QaEditor value={qa} onChange={setQa} />
-          </div>
-        </details>
+        <div className="kg-card-flat p-5 mt-8 kg-rise">
+          <SecLabel>問答 QA</SecLabel>
+          <p className="text-sm text-[#6f6156] mt-2 mb-4 leading-relaxed">常見問題集，企劃頁至少有一題才會顯示問答區。</p>
+          <QaEditor value={qa} onChange={setQa} groups={tagGroups} />
+        </div>
+        </>
+        )}
 
-        {/* 角色必填欄位 */}
-        <details className="kg-card kg-collapse p-6 sm:p-8 mt-10 kg-rise" style={{ animationDelay: '0.12s' }} open>
-          <summary className="cursor-pointer">
-            <div className="flex items-center gap-3">
-              <SecLabel>角色欄位</SecLabel>
-              <span className="kg-chevron ml-auto text-[#6f6156]" aria-hidden="true">▾</span>
-            </div>
-            <p className="text-sm text-[#6f6156] mt-2 leading-relaxed">
-              自訂創建角色時要填的欄位；勾「必填」的欄位，參加者不填就無法建立角色卡。
-            </p>
-          </summary>
-          <div className="mt-5">
-            <FieldsEditor value={fields} onChange={setFields} />
-          </div>
-        </details>
+        {tab === 'fields' && (
+        <section className="kg-rise">
+          <SecLabel>角色欄位</SecLabel>
+          <p className="text-sm text-[#6f6156] mt-2 mb-4 leading-relaxed">
+            創建角色時要填的欄位。設為必填的，參加者不填就無法建立。
+          </p>
+          <FieldsEditor value={fields} onChange={setFields} />
+        </section>
+        )}
 
-        {/* 名單總覽 */}
-        <section className="mt-12 kg-rise" style={{ animationDelay: '0.16s' }}>
+        {tab === 'tags' && (
+        <section className="kg-rise">
+          <SecLabel>分類詞庫</SecLabel>
+          <p className="text-sm text-[#6f6156] mt-2 mb-4 leading-relaxed">
+            陣營、種族這類標籤。角色加入／編輯時勾選，問答也可掛同一批。企劃頁的名單與問答能用標籤篩選。
+          </p>
+          <TagGroupEditor value={tagGroups} onChange={setTagGroups} />
+        </section>
+        )}
+
+        {tab === 'roster' && (
+        <section className="kg-rise">
           <SecLabel>名單總覽</SecLabel>
           <h2 className="font-huninn text-2xl mt-1.5 mb-4">{rows.length} 位角色</h2>
           <div className="kg-card-flat overflow-x-auto">
@@ -431,7 +466,12 @@ export default function ManagePage({ slug }: { slug: string }) {
                       <a href={href(`/p/${slug}/c/${c.id}`)} className="flex items-center gap-2 font-bold hover:text-[#9e4b2c]">
                         <CharAvatar name={c.name} url={c.avatar_url} size={30} />
                         {c.name}
-                        {c.status === 'draft' && (
+                        {c.slot && (
+                          <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
+                            空位
+                          </span>
+                        )}
+                        {!c.slot && c.status === 'draft' && (
                           <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
                             草稿
                           </span>
@@ -469,8 +509,10 @@ export default function ManagePage({ slug }: { slug: string }) {
           </div>
           <p className="font-mono2 text-[11px] text-[#6f6156] mt-3">＊ 移除為軟刪除：角色不再公開顯示，紀錄保留以備追溯。</p>
         </section>
+        )}
       </main>
       <SiteFooter />
+      <StickySaveBar dirty={dirty} busy={saving} onSave={() => { void doSave(); }} />
     </div>
   );
 }

@@ -9,7 +9,7 @@ import { characters, events, type CharacterRow } from '../db/schema';
 import { AUTH_FAIL, genPublicId, genToken, normJoinCode, sha256hex } from '../auth/token';
 import { charCookieLine, resolveToken } from '../auth/guard';
 import { getProjectRaw } from './project';
-import { fromJson, type WorldBlock } from './shapes';
+import { fromJson, sanitizeLinks, sanitizeTags, type WorldBlock } from './shapes';
 
 type DB = DrizzleD1Database;
 
@@ -22,6 +22,8 @@ export function toChar(c: CharacterRow) {
     avatar_url: c.avatarUrl,
     profile: fromJson<Record<string, string>>(c.profile, {}),
     blocks: fromJson<WorldBlock[]>(c.blocks, []),
+    links: sanitizeLinks(fromJson(c.links, [])),
+    tags: sanitizeTags(fromJson(c.tags, [])),
     status: c.status,
     created_at: c.createdAt,
     updated_at: c.updatedAt,
@@ -61,6 +63,7 @@ export async function joinProject(
   input: {
     name: string; one_liner?: string; avatar_url?: string;
     profile?: Record<string, string>; blocks?: WorldBlock[]; join_code?: string;
+    links?: unknown; tags?: unknown;
   },
 ): Promise<{ ok: true; character: ReturnType<typeof toChar>; charToken: string; cookie: string } | { error: string }> {
   const p = await getProjectRaw(db, slug);
@@ -84,6 +87,8 @@ export async function joinProject(
     avatarUrl: input.avatar_url || null,
     profile: input.profile ?? {},
     blocks: input.blocks ?? [],
+    links: sanitizeLinks(input.links),
+    tags: sanitizeTags(input.tags),
     status: 'draft',
     editTokenHash: await sha256hex(charToken),
     createdAt: now,
@@ -134,6 +139,7 @@ export async function patchChar(
   patch: {
     name?: string; one_liner?: string; avatar_url?: string;
     profile?: Record<string, string>; blocks?: WorldBlock[];
+    links?: unknown; tags?: unknown;
   },
 ): Promise<{ ok: true; updated_at: number } | { error: string }> {
   const got = await getChar(db, slug, charId);
@@ -147,6 +153,8 @@ export async function patchChar(
   if (patch.avatar_url !== undefined) set.avatarUrl = patch.avatar_url || null;
   if (patch.profile !== undefined) set.profile = patch.profile;
   if (patch.blocks !== undefined) set.blocks = patch.blocks;
+  if (patch.links !== undefined) set.links = sanitizeLinks(patch.links);
+  if (patch.tags !== undefined) set.tags = sanitizeTags(patch.tags);
 
   const activating = c.status === 'draft';
   if (activating) set.status = 'active';

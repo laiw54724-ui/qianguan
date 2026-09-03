@@ -1,4 +1,6 @@
 // 資料模型 — 對應架構規格 §3.1 DDL
+import type { SocialLink } from "./links";
+
 export type Visibility = 'public' | 'unlisted';
 export type JoinMode = 'open' | 'code';
 export type CharStatus = 'active' | 'draft' | 'removed';
@@ -37,6 +39,15 @@ export interface QaItem {
   id: string;
   q: string;
   a: string;
+  tags?: string[];
+}
+
+// 企劃分類詞庫（陣營／種族…）；角色與問答共用
+export interface TagGroup {
+  id: string;
+  name: string;
+  tags: string[];
+  required?: boolean;
 }
 
 // 牽線的「其他補充」自由區塊
@@ -102,6 +113,8 @@ export interface PaletteColor {
   hex: string;
 }
 
+export type { PlatformId, SocialLink } from "./links";
+
 export interface Project {
   id: string; // prj_xxxxxxxx
   slug: string;
@@ -120,6 +133,8 @@ export interface Project {
   is_verified: boolean;
   announcement: string | null;
   field_schema: FieldDef[];
+  tag_groups?: TagGroup[];
+  links?: SocialLink[];
   rev: number;
   created_at: number;
   updated_at: number;
@@ -132,7 +147,10 @@ export interface Character {
   one_liner: string;
   avatar_url: string | null;
   profile: Record<string, string>;
-  blocks: WorldBlock[]; // 角色卡自由區塊
+  blocks: WorldBlock[];
+  links?: SocialLink[];
+  tags?: string[];
+  slot?: boolean;
   edit_token_hash: string;
   status: CharStatus;
   created_at: number;
