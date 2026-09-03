@@ -24,6 +24,7 @@
 | project_id | text not null, FK projects.id | |
 | char_id | text, FK characters.id | 只有 `kind='char'` 時有值 |
 | encrypted_token | text not null | AES-GCM 密文（見「權杖加密」一節） |
+| confirmed | integer not null default 0 | 0＝自動收錄、尚未確認；1＝明確 OAuth 連結，或使用者在儀表板按過「這是我的」。只有 `confirmed=1` 的列會在流程三重新簽發 cookie（見「為什麼要有 confirmed」一節） |
 | created_at | integer not null | |
 
 索引：**不能**用單一個 `UNIQUE(discord_id, kind, project_id, char_id)`——`kind='owner'` 的列 `char_id` 是 NULL，SQL 的 NULL 在唯一性比對裡永遠不等於 NULL，這個組合實際上擋不住重複的 owner 連結。改用兩條部分索引（partial unique index，SQLite 支援 `WHERE`）：
@@ -71,15 +72,15 @@ CREATE UNIQUE INDEX idx_links_char  ON user_links(discord_id, char_id)    WHERE 
    - 從 `OAUTH_STATE` 讀 `state_id`（讀到就立刻刪除——見「state 防護」一節）；讀不到（過期或已用過）就整個流程失敗，導回一個通用錯誤頁。
    - 用 `code` 跟 Discord 換 access token（`DISCORD_CLIENT_ID` + `DISCORD_CLIENT_SECRET`），再用 access token 打 `/users/@me` 拿 `discord_id`（只取這一個欄位）。
    - 重新驗證這個請求現在還帶著有效的 `kg_o_<projectId>`（mode link + 無 charId）或 `kg_c_<projectId>` 且該權杖 hash 對得上 `charDbId`（mode link + 有 charId）——**直接重用既有的 `requireOwner`/`requireChar`**，不重寫驗證邏輯。驗證失敗就整個流程失敗（避免有人在連結途中把 cookie 清掉還硬要連結）。
-   - 驗證通過的話，這個請求裡本來就有那把 cookie 的明文（httpOnly 只擋前端 JS 讀，伺服器端讀 header 本來就讀得到）——用它加密後 upsert 進 `user_links`。
+   - 驗證通過的話，這個請求裡本來就有那把 cookie 的明文（httpOnly 只擋前端 JS 讀，伺服器端讀 header 本來就讀得到）——用它加密後 upsert 進 `user_links`，**`confirmed=1`**（這是唯一一個「明確 OAuth 動作」的路徑，直接視為已確認，不需要事後再按一次「這是我的」）。
    - 簽發 `kg_u` cookie（見下）。
    - 轉址回**從 KV 讀到的 state 內容自己組出來的路徑**（`/p/<slug>/manage` 或 `/p/<slug>/c/<charId>`），絕不接受 callback 請求上任何額外的轉址參數（見「開放轉址防護」）。
 
-## 流程二：登入後自動收錄（不用再跳 OAuth）
+## 流程二：登入後自動收錄（不用再跳 OAuth，但不自動授權）
 
 這是使用者提出的關鍵修正：**逐項綁定的原設計會讓人第二次卡在「我不是登入了嗎」的困惑**，改成——
 
-只要瀏覽器上已經有效的 `kg_u`（代表這個裝置這個瀏覽器已經連過一次 Discord），之後任何一個會發出新的 `kg_o_`/`kg_c_` cookie 的既有端點，都在原本設定 cookie 那一步之後，**靜默**多做一次「若 `kg_u` 存在就 upsert `user_links`」。不用按鈕、不用 OAuth、使用者無感：
+只要瀏覽器上已經有效的 `kg_u`（代表這個裝置這個瀏覽器已經連過一次 Discord），之後任何一個會發出新的 `kg_o_`/`kg_c_` cookie 的既有端點，都在原本設定 cookie 那一步之後，多做一次「若 `kg_u` 存在就 upsert `user_links`」，**但寫入的是 `confirmed=0`**：
 
 - `POST /api/projects`（建新企劃）
 - `POST /api/p/:slug/owner-session`（貼開設者碼救援）
@@ -87,9 +88,17 @@ CREATE UNIQUE INDEX idx_links_char  ON user_links(discord_id, char_id)    WHERE 
 - `POST /api/p/:slug/c/:charId/session`（貼編輯碼救援）
 - `POST /api/p/:slug/c/:charId/draft-char`（已持有本企劃某角色權杖時再開一隻）
 
-這五個端點目前都已經有 `c.header('Set-Cookie', r.cookie, ...)` 這一步，加一個共用 helper（例如 `maybeAutoLink(c, kind, projectId, charId, rawToken)`）在後面呼叫：讀 `kg_u`（驗證其 HMAC 簽章合法），合法就用同一把 `LINK_KEY` 衍生金鑰加密 `rawToken`，upsert 進 `user_links`。整個動作在回傳回應前 `await` 完成，不用 `waitUntil`（單筆 upsert 延遲可忽略，換取正確性簡單）。
+這五個端點目前都已經有 `c.header('Set-Cookie', r.cookie, ...)` 這一步，加一個共用 helper（例如 `maybeAutoLink(c, kind, projectId, charId, rawToken)`）在後面呼叫，邏輯：
 
-使用者第一次連結後，之後每加入一個新企劃／認領一個新角色／換裝置貼碼救援，都會自動被收進 Discord 帳號底下的清單——符合「我已經登入了」的直覺。
+1. 讀 `kg_u`，驗證 HMAC，不合法就整段跳過（等同沒有這個功能）。
+2. **查是否已有其他 `discord_id` 對同一個 `(kind, project_id[, char_id])` 建過連結（不分 `confirmed` 是 0 還是 1）**——有的話直接跳過，不寫入任何東西。這是使用者的第二項修正：避免共用電腦上不同的人依序把同一個角色/企劃收進各自帳號下造成混亂。
+3. 查是否已有「這個 `discord_id`」對同一個目標的既有列——有的話什麼都不做（**絕不把已經是 `confirmed=1` 的列改回 0**；已確認的不會被後續的自動收錄動作降級）。
+4. 都沒有的話才新增一列，`confirmed=0`。
+5. 這次呼叫如果真的新增了一列（不是第 3 點的既有列命中），回應 body 附帶 `{ discord_pending: { linkId, label } }`（`label` 是給前端 toast 顯示用的人類可讀名稱，如角色名或企劃標題），前端據此彈出「已加入『<label>』到你的 Discord 待確認清單［取消連結］」，按鈕直接打流程四的 `DELETE /api/me/links/:linkId`（見「Toast 與取消連結」一節）。既有列命中（第 3 點）不重複彈 toast。
+
+整個動作在回傳回應前 `await` 完成，不用 `waitUntil`（單筆查詢+upsert 延遲可忽略，換取正確性簡單）。
+
+使用者第一次連結後，之後每加入一個新企劃／認領一個新角色／換裝置貼碼救援，都會自動出現在 Discord 帳號底下的「待確認」清單——符合「我已經登入了」的直覺，但**在使用者按過「這是我的」之前，這一列不會讓任何裝置取得該項目的存取權**（見下一節「為什麼要有 confirmed」）。
 
 ## 流程三：新裝置登入（恢復所有已連結項目）
 
@@ -99,15 +108,35 @@ CREATE UNIQUE INDEX idx_links_char  ON user_links(discord_id, char_id)    WHERE 
 2. `OAUTH_STATE` 寫入 `{ mode: 'restore' }`，其餘同流程一步驟 2–4。
 3. Callback 驗證 state、換 token、拿 `discord_id` 後（同流程一）：
    - 因為 `mode='restore'` 不需要重新驗證既有 cookie（本來就沒有）。
-   - 查 `user_links WHERE discord_id = ?` 全部列出。
+   - 查 `user_links WHERE discord_id = ? AND confirmed = 1`——**只處理已確認的列**，`confirmed=0` 的待確認列在這裡直接略過，不解密、不簽發任何 cookie。
    - 對每一列：解密 `encrypted_token`。**注意**：`charCookieLine()` 現有的合併邏輯（同企劃多角色用 `.` 接成一個 cookie 值）是讀「這次請求帶進來的 cookie header」去併新舊權杖——這個假設在平常「一次只加一隻新角色」的情境成立，但 restore 一次可能要恢復同一個 `project_id` 底下的好幾隻角色，這時如果對每一列各自呼叫一次 `charCookieLine()` 再各自 `append` 一個 `Set-Cookie`，會產生同名 cookie 的多個 `Set-Cookie` 標頭，瀏覽器只會留下其中一個，其餘角色的權杖就遺失了。restore 流程要先在記憶體裡把同 `project_id` 的角色權杖依 `.` 合併成一個字串，每個 `project_id` 只送一個 `kg_c_<projectId>` cookie；`kg_o_<projectId>`（開設者）本來就每企劃最多一列，不會遇到這個問題。
    - 全部 `append` 進回應（一次登入拿回所有企劃/角色的存取）。
    - 簽發 `kg_u`。
    - 轉址到 `/dashboard`（固定路徑，state 不帶任何自訂轉址目標）。
 
-## 流程四：解除連結
+## 為什麼要有 `confirmed`（取代原本考慮的「新鮮度窗口」）
 
-`DELETE /api/me/links/:id`：讀 `kg_u`（驗證 HMAC），確認該 `user_links` 列的 `discord_id` 跟 `kg_u` 解出來的 `discord_id` 相符才能刪；不符一律 404（不透露列存在與否，統一風格）。刪除只影響「這個 Discord 帳號的清單」與「之後這個裝置對這個項目還會不會自動收錄」，**不影響**底層 `owner_token_hash`/`edit_token_hash`，不強制登出任何正在用該 cookie 的分頁（v1 不做 cookie 主動撤銷）。
+**場景**：共用電腦，A 已經用 Discord 登入（瀏覽器有 `kg_u`）。B 走過來貼自己的編輯碼救援自己的角色。流程二的自動收錄若沒有 `confirmed` 這道閘，B 的角色會直接被寫進 A 的 `user_links`；更嚴重的是，之後 A 在**任何裝置**用 Discord 登入（流程三 restore）都會拿到 B 那個角色的有效編輯 cookie——一次共用電腦的巧合，變成 A 對 B 角色永久、持續的存取權，而且沒有任何環節會通知 B。
+
+最早考慮的修法是「`kg_u` 加簽發時間戳，只在登入後一段時間內才允許自動收錄」，但這個方向被否決了：時間窗口是一個**靜默失敗**的機制——過了窗口，自動收錄悄悄不觸發，使用者不會收到任何訊息，只會發現「東西不在清單上」而以為站壞了。這正是本專案拿掉草稿／發布雙層模型時想根除的那類 bug（見《牽關-實際狀況與檢查報告.md》）：一個看不見的閘門，讓使用者以為自己做了某件事，其實沒有。窗口多長也是個沒有依據的魔術數字。
+
+改用 `confirmed` 把「列在清單上」跟「可以恢復 cookie」拆成兩件事：
+
+- 流程二的自動收錄永遠寫 `confirmed=0`——**不管 kg_u 是誰的**，都不會有任何後果，因為 `confirmed=0` 的列在流程三（restore）裡直接被跳過，不解密、不簽發 cookie。共用電腦情境的最壞後果，從「A 取得 B 角色的持久編輯權」降成「A 的儀表板上多一筆他沒見過、標成待確認、點了也拿不到任何存取權的項目」——不是縮小風險窗口，是把那條「自動收錄 → 未來自動變成有效存取」的升級路徑整個拿掉。
+- 只有兩種方式能讓一列變成 `confirmed=1`：流程一的明確 OAuth 連結（本來就要求當下驗證過 `requireOwner`/`requireChar`），或使用者自己在儀表板對著一筆待確認項目按「這是我的」（見下）。兩者都需要真人在當下做一個有意識的動作。
+- 代價：合法使用者偶爾要多按一次確認（例如手機上新增角色、之後換電腦登入 Discord，會看到「待確認」）。這次點擊本身也順便讓使用者看見「清單上多了東西」，跟下面「Toast 與取消連結」要達成的透明度是同一件事，不是額外負擔。
+
+## 流程四：確認、儀表板、解除連結
+
+`GET /api/me/links`：讀 `kg_u`，回傳這個 `discord_id` 底下**所有**列（`confirmed=0` 與 `1` 都回，附帶各自的 `confirmed` 值與 `label`）。前端依 `confirmed` 分兩區塊顯示；`confirmed=0` 的項目旁邊放「這是我的」按鈕。
+
+`POST /api/me/links/:id/confirm`：讀 `kg_u`（驗證 HMAC），確認該列 `discord_id` 跟 `kg_u` 解出來的相符才能操作，不符一律 404。相符就把 `confirmed` 設為 1（已經是 1 就當成功，冪等）。**這一步不重新驗證底層的企劃/角色所有權**——`encrypted_token` 本身在寫入當下就已經是從一次合法的 `requireOwner`/`requireChar` 驗證裡取得的真實憑證，「確認」只是決定要不要讓*這個* Discord 身分能夠使用它，不是重新證明所有權；真正的所有權證明早在自動收錄那一刻就已經發生過了。
+
+`DELETE /api/me/links/:id`：讀 `kg_u`（驗證 HMAC），確認該 `user_links` 列的 `discord_id` 跟 `kg_u` 解出來的 `discord_id` 相符才能刪；不符一律 404（不透露列存在與否，統一風格）。同一個端點兩種用途：儀表板上對「待確認」項目按「不是我／忽略」，或對「已確認」項目按「取消連結」；也是「Toast 與取消連結」裡按鈕呼叫的端點。刪除只影響「這個 Discord 帳號的清單」與「之後這個裝置對這個項目還會不會自動收錄」，**不影響**底層 `owner_token_hash`/`edit_token_hash`，不強制登出任何正在用該 cookie 的分頁（v1 不做 cookie 主動撤銷）。
+
+## Toast 與取消連結
+
+流程二的自動收錄若真的新增了一列，回應會帶 `discord_pending: { linkId, label }`（見流程二第 5 點）。前端在對應的既有成功處理路徑（`toast('...')`，五個觸發端點的呼叫端都已經在用這個既有的 toast 元件）多判斷一下這個欄位，顯示例如「已加入『小美』到你的 Discord 待確認清單」，並帶一個「取消連結」按鈕直接呼叫 `DELETE /api/me/links/:linkId`。這不只是通知，是把「取消」放在使用者第一眼會看到的地方。但這個 toast 是錦上添花，不是安全機制的主力——`confirmed` 閘本身已經防住了實際的存取風險，toast 純粹是透明度：讓使用者知道發生了什麼，即使他什麼都不做也不會有安全後果。
 
 ## `kg_u` cookie 設計
 
