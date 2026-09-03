@@ -28,7 +28,8 @@
     "enabled": true
   },
   "vars": {
-    "PUBLIC_SITE_NAME": "牽關"
+    "PUBLIC_SITE_NAME": "牽關",
+    "DISCORD_CLIENT_ID": "1544912164756656190"
   }
-  // Secrets（wrangler secret put）：TURNSTILE_SECRET
+  // Secrets（wrangler secret put）：TURNSTILE_SECRET, DISCORD_CLIENT_SECRET
 }
