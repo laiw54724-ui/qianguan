@@ -141,6 +141,10 @@ export default function ManagePage({ slug }: { slug: string }) {
       setError('企劃名稱不能空白');
       return false;
     }
+    if (joinMode === 'code' && !joinCode.trim() && !project?.has_join_code) {
+      setError('加入方式選了「需要加入碼」，請設定加入碼——不設的話會沒有人能加入');
+      return false;
+    }
     setSaving(true);
     setError(null);
     try {
@@ -361,16 +365,21 @@ export default function ManagePage({ slug }: { slug: string }) {
                 ]}
               />
               {joinMode === 'code' && (
-                <input
-                  className="kg-input font-mono2 mt-3"
-                  value={joinCode}
-                  onChange={(e) => setJoinCode(e.target.value)}
-                  placeholder={project.join_code_hash ? '留空 = 沿用原加入碼' : '設定加入碼'}
-                  autoComplete="off"
-                  autoCapitalize="none"
-                  autoCorrect="off"
-                  spellCheck={false}
-                />
+                <>
+                  <input
+                    className="kg-input font-mono2 mt-3"
+                    value={joinCode}
+                    onChange={(e) => setJoinCode(e.target.value)}
+                    placeholder={project.has_join_code ? '留空 = 沿用原加入碼' : '設定加入碼'}
+                    autoComplete="off"
+                    autoCapitalize="none"
+                    autoCorrect="off"
+                    spellCheck={false}
+                  />
+                  <p className="text-xs mt-1.5 font-bold" style={{ color: project.has_join_code ? '#24697f' : '#9e4b2c' }}>
+                    {project.has_join_code ? '✓ 已設定加入碼' : '尚未設定加入碼——選了「需要加入碼」但沒設定的話，沒有人能加入'}
+                  </p>
+                </>
               )}
             </div>
           </div>

@@ -127,9 +127,8 @@ export interface Project {
   icon_url: string | null; // 企劃頭像（方形小圖）
   visibility: Visibility;
   join_mode: JoinMode;
-  join_code_hash: string | null;
+  has_join_code: boolean;
   signups_open: boolean;
-  owner_token_hash: string;
   is_verified: boolean;
   announcement: string | null;
   field_schema: FieldDef[];

@@ -343,6 +343,14 @@ class HeadRewriter {
   }
 }
 
+// 圖片管線還沒接 R2（見《牽關-問題整理與工單.md》0-2），封面／頭像常是 data: URI。
+// OG crawler（Discord/Facebook/X…）不會抓 data: URI，硬塞只會讓卡片沒有圖——
+// 遇到非 http(s) 的圖一律當沒有圖，讓 HeadRewriter 不覆寫，繼承外殼預設的 og-default.png。
+function ogImageOrNull(url: string | null): string | null {
+  if (!url) return null;
+  return /^https?:\/\//i.test(url) ? url : null;
+}
+
 async function servePage(c: Ctx, slug: string, charId?: string) {
   const d = db(c);
   const asset = await c.env.ASSETS.fetch(new Request(new URL('/', c.req.url).toString(), c.req.raw));
@@ -363,13 +371,13 @@ async function servePage(c: Ctx, slug: string, charId?: string) {
 
   let title = `${p.title} | ${site}`;
   let description = p.summary || '多人 OC 牽線企劃';
-  let image = p.coverUrl;
+  let image = ogImageOrNull(p.coverUrl);
   if (charId) {
     const ch = await charSvc.getCharRaw(d, p.id, charId);
     if (ch && ch.status === 'active') {
       title = `${ch.name} | ${p.title}`;
       description = ch.oneLiner || description;
-      image = ch.avatarUrl || image;
+      image = ogImageOrNull(ch.avatarUrl) || image;
     }
   }
   const meta = { title, description, image };

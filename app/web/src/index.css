@@ -37,6 +37,29 @@
     scroll-behavior: smooth;
   }
 
+  /* 牽關-問題整理與工單.md 0-3：iOS Safari 對 <16px 的輸入框字級會自動放大整頁。
+     手機優先設 16px，桌面（≥640px）再用 media query 調小。不要用 maximum-scale/user-scalable
+     關掉縮放——那是無障礙倒退，不是修法。涵蓋原生 element 選擇器＋.kg-input 系列，
+     因為專案裡不是每個 <input> 都掛了 .kg-input class。 */
+  input,
+  textarea,
+  select,
+  .kg-input,
+  .kg-textarea,
+  .kg-select {
+    font-size: 16px;
+  }
+  @media (min-width: 640px) {
+    input,
+    textarea,
+    select,
+    .kg-input,
+    .kg-textarea,
+    .kg-select {
+      font-size: 0.95rem;
+    }
+  }
+
   body {
     background-color: var(--paper);
     color: var(--ink);
@@ -215,7 +238,9 @@
     border: 1.5px solid var(--rule);
     border-radius: 9px;
     padding: 0.6em 0.85em;
-    font-size: 0.95rem;
+    /* font-size 見上面 0-3 的 iOS 縮放修法區塊：class 選擇器優先度比原生 element 高，
+       字級規則統一寫在那裡（同時涵蓋 .kg-input 系列與沒掛這個 class 的原生輸入框），
+       這裡不要重複設，設了會蓋掉那邊的 media query。 */
     color: var(--ink);
     transition: border-color 0.15s, box-shadow 0.15s;
   }
