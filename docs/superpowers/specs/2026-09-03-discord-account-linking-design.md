@@ -1,7 +1,7 @@
 # 牽關 — Discord 帳號整合設計
 
 > 2026-09-03 ｜ 對照基準：《牽關-實際狀況與檢查報告.md》《牽關-後端串接文件.md》
-> 狀態：已與使用者對過方向，待實作
+> 狀態：**設計完整，暫緩實作**——優先序排在《牽關-問題整理與工單.md》的 P0–P1 之後（先讓企劃真的能用、收回饋，Discord 整合不急）。這份文件收著，之後要動工時直接接手 writing-plans 即可，不用重新設計。
 
 ## 目標
 
@@ -47,8 +47,12 @@ CREATE UNIQUE INDEX idx_links_char  ON user_links(discord_id, char_id)    WHERE 
 ## 權杖加密（威脅模型變化，記錄在案）
 
 `encrypted_token` 用 AES-GCM 加密，金鑰是新的 Workers secret `LINK_KEY`（32 bytes 隨機值，`wrangler secret put LINK_KEY`，永不進 git、永不進 D1）。用 HKDF 從 `LINK_KEY` 衍生兩把子金鑰，分開兩種用途避免同一把原始金鑰材料兩處重用：
-- 子金鑰 A：AES-GCM 加密 `encrypted_token`
-- 子金鑰 B：HMAC 簽章 `kg_u` cookie（見下）
+- 子金鑰 A：AES-GCM 加密 `encrypted_token`，HKDF `info = "kg-link-enc-v1"`
+- 子金鑰 B：HMAC 簽章 `kg_u` cookie（見下），HKDF `info = "kg-u-hmac-v1"`
+
+**這兩個 `info` 字串是寫死的常數，不能省略、不能兩個子金鑰共用同一個值**——HKDF 給同樣的 `info` 就會衍生出同一把金鑰，「分兩把金鑰分開用途」的意義就沒了。字串裡帶 `-v1` 是為了以後萬一要換衍生方式（例如金鑰輪替）有版本可以區分，不是裝飾。
+
+**AES-GCM 的 nonce**：每次加密都要用 `crypto.getRandomValues()` 生一個新的 96-bit（12 bytes）隨機值當 nonce，**不可以固定、不可以從金鑰或明文推導**——nonce 重用是 AES-GCM 最常見也最嚴重的實作錯誤，一旦同一把金鑰下兩次加密用了同一個 nonce，機密性直接被破。nonce 本身不是秘密，跟密文存在一起即可（例如 `encrypted_token` 存 `base64(nonce) + ':' + base64(ciphertext)`），解密時從存好的值裡把 nonce 拆出來用。
 
 **這是本專案安全模型第一次出現「可還原」的權杖儲存，必須明確記錄**：
 
@@ -128,9 +132,11 @@ CREATE UNIQUE INDEX idx_links_char  ON user_links(discord_id, char_id)    WHERE 
 
 ## 流程四：確認、儀表板、解除連結
 
-`GET /api/me/links`：讀 `kg_u`，回傳這個 `discord_id` 底下**所有**列（`confirmed=0` 與 `1` 都回，附帶各自的 `confirmed` 值與 `label`）。前端依 `confirmed` 分兩區塊顯示；`confirmed=0` 的項目旁邊放「這是我的」按鈕。
+`GET /api/me/links`：讀 `kg_u`，回傳這個 `discord_id` 底下**所有**列。**回應形狀刻意收窄**：每筆只有 `{ id, kind, confirmed, projectTitle, charName? }`，不 join 出完整的 `project`/`character` 物件——尤其不帶封面圖、簡介、世界觀等欄位。這不是效能考量，是共用電腦情境的直接防線：`confirmed=0` 的項目本來就可能是別人的東西誤收錄進來的，儀表板只顯示「名稱」讓使用者能辨認「這是不是我的」，不能連封面/簡介一起洩漏出去給正在用這台電腦的人看。這條規則對 `confirmed=1` 的列一併適用（不用兩套邏輯）。
 
 `POST /api/me/links/:id/confirm`：讀 `kg_u`（驗證 HMAC），確認該列 `discord_id` 跟 `kg_u` 解出來的相符才能操作，不符一律 404。相符就把 `confirmed` 設為 1（已經是 1 就當成功，冪等）。**這一步不重新驗證底層的企劃/角色所有權**——`encrypted_token` 本身在寫入當下就已經是從一次合法的 `requireOwner`/`requireChar` 驗證裡取得的真實憑證，「確認」只是決定要不要讓*這個* Discord 身分能夠使用它，不是重新證明所有權；真正的所有權證明早在自動收錄那一刻就已經發生過了。
+
+`POST /api/me/links/:id/unconfirm`：跟 `confirm`對稱，把 `confirmed` 設回 0（同樣驗 `kg_u` 相符、冪等）。**這是使用者按錯「這是我的」時的反悔路徑**——`confirm` 不能只有單向。使用者要復原一筆誤確認的連結，有兩個等效選項：`unconfirm`（降回待確認，項目還留著）或直接 `DELETE`（整筆移除）；兩個端點都要有，UI 上至少要有一個明顯可按的動作，不能只給「確認」不給「取消確認」。
 
 `DELETE /api/me/links/:id`：讀 `kg_u`（驗證 HMAC），確認該 `user_links` 列的 `discord_id` 跟 `kg_u` 解出來的 `discord_id` 相符才能刪；不符一律 404（不透露列存在與否，統一風格）。同一個端點兩種用途：儀表板上對「待確認」項目按「不是我／忽略」，或對「已確認」項目按「取消連結」；也是「Toast 與取消連結」裡按鈕呼叫的端點。刪除只影響「這個 Discord 帳號的清單」與「之後這個裝置對這個項目還會不會自動收錄」，**不影響**底層 `owner_token_hash`/`edit_token_hash`，不強制登出任何正在用該 cookie 的分頁（v1 不做 cookie 主動撤銷）。
 
