@@ -2,9 +2,10 @@ import { useEffect, useState } from 'react';
 import { getProject, joinProject, listCharacters } from '../lib/api';
 import { addMyChar } from '../lib/session';
 import { href } from '../lib/nav';
-import { PageLoading, ErrorBox, toast, ImageField, ImeInput, SecLabel, SheetableField, SiteFooter, SiteHeader, StickySaveBar, TagPicker, TokenReveal, TurnstileWidget, TURNSTILE_REQUIRED, type RosterLite } from '../components/kg';
+import { PageLoading, ErrorBox, toast, ImageField, ImeInput, SecLabel, SheetableField, StickySaveBar, TagPicker, TokenReveal, TurnstileWidget, TURNSTILE_REQUIRED, type RosterLite } from '../components/kg';
 import { SocialLinksEditor } from '../components/links';
 import { sanitizeLinks, type SocialLink } from '../lib/links';
+import { ProjectShell } from '../components/project-shell';
 import type { Character, Project } from '../lib/types';
 
 export default function JoinPage({ slug }: { slug: string }) {
@@ -39,20 +40,14 @@ export default function JoinPage({ slug }: { slug: string }) {
   }, [slug]);
 
   if (project === undefined) return (
-    <div className="min-h-screen flex flex-col">
-      <SiteHeader />
-      <main className="flex-1">
-        <PageLoading />
-      </main>
-    </div>
+    <ProjectShell slug={slug} title="" active={null}>
+      <PageLoading />
+    </ProjectShell>
   );
   if (project === null) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="font-display font-black text-4xl">查無此企劃</div>
-        </main>
+      <div className="min-h-screen flex flex-col items-center justify-center px-4">
+        <div className="font-display font-black text-4xl">查無此企劃</div>
       </div>
     );
   }
@@ -93,9 +88,8 @@ export default function JoinPage({ slug }: { slug: string }) {
 
   if (created) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="mx-auto max-w-xl px-4 sm:px-6 py-16 w-full">
+      <ProjectShell slug={slug} title={project.title} active={null}>
+        <div className="mx-auto max-w-xl px-4 sm:px-6 py-16 w-full">
           <div className="mb-6">
             <SecLabel>歡迎登船</SecLabel>
             <h1 className="font-display font-black text-4xl mt-2">「{created.character.name}」已加入 {project.title}</h1>
@@ -113,16 +107,14 @@ export default function JoinPage({ slug }: { slug: string }) {
               開始牽線
             </a>
           </TokenReveal>
-        </main>
-        <SiteFooter />
-      </div>
+        </div>
+      </ProjectShell>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <SiteHeader />
-      <main className="kg-form-page mx-auto max-w-2xl px-4 sm:px-6 py-14 w-full">
+    <ProjectShell slug={slug} title={project.title} active={null}>
+      <div className="kg-form-page mx-auto max-w-2xl px-4 sm:px-6 py-14 w-full">
         <SecLabel>加入企劃</SecLabel>
         <h1 className="font-display font-black text-4xl mt-2 mb-2">
           建立角色卡 <span className="text-[#6f6156] text-2xl">／ {project.title}</span>
@@ -232,15 +224,15 @@ export default function JoinPage({ slug }: { slug: string }) {
           <TurnstileWidget token={turnstileToken} onChange={setTurnstileToken} />
           {error && <ErrorBox>{error}</ErrorBox>}
         </div>
-      </main>
-      <SiteFooter />
+      </div>
       <StickySaveBar
+        inShell
         dirty={!!name.trim() && project.signups_open && !busy}
         busy={busy}
         onSave={() => { void submit(); }}
         saveLabel="建立角色卡"
         status={name.trim() ? '可以建立' : '先填角色名稱'}
       />
-    </div>
+    </ProjectShell>
   );
 }

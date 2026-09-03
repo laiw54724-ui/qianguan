@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { acceptedRelations, getCharacter, listCharacters, sideOf, verifyCharToken, type CharacterView } from '../lib/api';
 import { href } from '../lib/nav';
-import { PageLoading, BlockView, CharAvatar, EmptyNote, ErrorBox, FieldView, PreviewModal, SecLabel, SiteFooter, SiteHeader, ThreadLink, type PreviewTarget, type RosterLite } from '../components/kg';
+import { PageLoading, BlockView, CharAvatar, EmptyNote, ErrorBox, FieldView, PreviewModal, SecLabel, ThreadLink, type PreviewTarget, type RosterLite } from '../components/kg';
 import { SocialLinkChips } from '../components/links';
+import { ProjectShell } from '../components/project-shell';
 import type { Character, Relation } from '../lib/types';
 
 export default function CharacterPage({ slug, charId }: { slug: string; charId: string }) {
@@ -17,12 +18,15 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
   const [preview, setPreview] = useState<{ block: PreviewTarget; idx: number } | null>(null);
 
   const refresh = async () => {
-    const got = await getCharacter(slug, charId);
+    // 1-2：三條查詢彼此不依賴，並行抓，不要排隊
+    const [got, all, chars] = await Promise.all([
+      getCharacter(slug, charId),
+      acceptedRelations(slug),
+      listCharacters(slug),
+    ]);
     setData(got);
     if (!got) return;
-    const all = await acceptedRelations(slug);
     setRels(all.filter((r) => r.a_id === charId || r.b_id === charId));
-    const chars = await listCharacters(slug);
     setCharMap(new Map(chars.map((c) => [c.id, c])));
     // 身分由伺服器依 cookie 推斷
     setOwned(got.viewer.owned);
@@ -47,20 +51,14 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
   const rosterLite: RosterLite[] = useMemo(() => [...charMap.values()].map((c) => ({ id: c.id, name: c.name, avatar_url: c.avatar_url })), [charMap]);
 
   if (data === undefined) return (
-    <div className="min-h-screen flex flex-col">
-      <SiteHeader />
-      <main className="flex-1">
-        <PageLoading />
-      </main>
-    </div>
+    <ProjectShell slug={slug} title="" active={null}>
+      <PageLoading />
+    </ProjectShell>
   );
   if (data === null) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="font-huninn text-4xl">查無此角色</div>
-        </main>
+      <div className="min-h-screen flex flex-col items-center justify-center px-4">
+        <div className="font-huninn text-4xl">查無此角色</div>
       </div>
     );
   }
@@ -77,9 +75,8 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <SiteHeader />
-      <main className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
+    <ProjectShell slug={slug} title={project.title} active={null}>
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
         <a href={href(`/p/${slug}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← {project.title}
         </a>
@@ -240,9 +237,8 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
           )}
           <p className="font-mono2 text-[11px] text-[#6f6156] mt-3">＊ 待確認與已婉拒的牽線只有雙方看得到。</p>
         </section>
-      </main>
-      <SiteFooter />
+      </div>
       {preview && <PreviewModal block={preview.block} startIndex={preview.idx} onClose={() => setPreview(null)} />}
-    </div>
+    </ProjectShell>
   );
 }

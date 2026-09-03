@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useTransition } from 'react';
 import { checkLeave } from './dirty';
 import { normSlug } from './tokens';
 
@@ -9,14 +9,22 @@ export function navigate(path: string) {
   window.location.hash = p;
 }
 
-export function useHashPath(): string {
+// 1-2：換頁的 setState 包進 startTransition，isPending 拿去驅動頂部進度條（見 RouteProgress），
+// 不再是固定時間的假動畫。用 useTransition 自己回傳的 start 函式才會反映在它自己的 isPending 上，
+// 全域 startTransition 不會。
+export function useHashPath(): { path: string; isPending: boolean } {
   const [path, setPath] = useState(() => window.location.hash.replace(/^#/, '') || '/');
+  const [isPending, startPathTransition] = useTransition();
   useEffect(() => {
-    const onChange = () => setPath(window.location.hash.replace(/^#/, '') || '/');
+    const onChange = () => {
+      const next = window.location.hash.replace(/^#/, '') || '/';
+      startPathTransition(() => setPath(next));
+    };
     window.addEventListener('hashchange', onChange);
     return () => window.removeEventListener('hashchange', onChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
-  return path;
+  return { path, isPending };
 }
 
 export function href(path: string) {

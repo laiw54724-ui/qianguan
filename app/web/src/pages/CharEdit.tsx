@@ -11,8 +11,6 @@ import {
   PageLoading,
   SecLabel,
   SheetableField,
-  SiteFooter,
-  SiteHeader,
   StickySaveBar,
   TagPicker,
   TokenGate,
@@ -23,6 +21,7 @@ import {
 import { SocialLinksEditor } from '../components/links';
 import { fieldHasContent } from '../lib/fvals';
 import { sanitizeLinks, type SocialLink } from '../lib/links';
+import { ProjectShell } from '../components/project-shell';
 import type { WorldBlock } from '../lib/types';
 
 const BUF_KEY = (charId: string) => `draft_${charId}`; // kg_buf_draft_<charId>，對齊規格 §12 的 kg_draft_<charId> 語意
@@ -77,6 +76,8 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
 
   useEffect(() => {
     (async () => {
+      // 1-2：名單跟角色本身資料無關，先一起發出去，不用排在後面等
+      const rosterPromise = listCharacters(slug);
       const got = await getCharacter(slug, charId);
       setData(got);
       if (!got) return;
@@ -103,7 +104,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
           setDraftNotice(true);
         }
       }
-      const cs = await listCharacters(slug);
+      const cs = await rosterPromise;
       setRoster(cs.filter((c) => c.id !== charId).map((c) => ({ id: c.id, name: c.name, avatar_url: c.avatar_url })));
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -174,21 +175,15 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
 
   if (data === undefined) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1">
-          <PageLoading text="正在打開角色卡…" />
-        </main>
-      </div>
+      <ProjectShell slug={slug} title="" active={null}>
+        <PageLoading text="正在打開角色卡…" />
+      </ProjectShell>
     );
   }
   if (data === null) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="font-display font-black text-4xl">查無此角色</div>
-        </main>
+      <div className="min-h-screen flex flex-col items-center justify-center px-4">
+        <div className="font-display font-black text-4xl">查無此角色</div>
       </div>
     );
   }
@@ -196,9 +191,8 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
   if (!authed) {
     // 權杖救回：清掉瀏覽器資料後，貼編輯碼即可重新取得編輯權（後端驗過會種 cookie）
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1 px-4 sm:px-6 py-16">
+      <ProjectShell slug={slug} title={data.project.title} active={null}>
+        <div className="px-4 sm:px-6 py-16">
           <TokenGate
             title={`編輯「${data.character.name}」`}
             hint="貼上主辦或你自己保存的那串編輯碼。這台裝置驗證過就會記住。"
@@ -217,18 +211,16 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
               snapshot.current = JSON.stringify(currentForm());
             }}
           />
-        </main>
-        <SiteFooter />
-      </div>
+        </div>
+      </ProjectShell>
     );
   }
 
   const { project } = data;
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <SiteHeader />
-      <main className="kg-form-page mx-auto max-w-2xl px-4 sm:px-6 py-10 w-full">
+    <ProjectShell slug={slug} title={project.title} active={null}>
+      <div className="kg-form-page mx-auto max-w-2xl px-4 sm:px-6 py-10 w-full">
         <a href={href(`/p/${slug}/c/${charId}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← 回角色頁
         </a>
@@ -389,9 +381,8 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
             {error && <ErrorBox>{error}</ErrorBox>}
           </div>
         )}
-      </main>
-      <SiteFooter />
-      <StickySaveBar dirty={dirty} busy={busy} onSave={() => { void doSave(); }} />
-    </div>
+      </div>
+      <StickySaveBar inShell dirty={dirty} busy={busy} onSave={() => { void doSave(); }} />
+    </ProjectShell>
   );
 }

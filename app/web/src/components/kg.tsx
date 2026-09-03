@@ -170,29 +170,33 @@ export function PageLoading({ text = '載入中…' }: { text?: string }) {
 }
 
 // 換頁時的頂部細進度條（hash 路由沒有瀏覽器原生進度提示）
-export function RouteProgress({ path }: { path: string }) {
-  const [w, setW] = useState(0);
+// 1-2：字寬跟著 useTransition 的 isPending 走，不是固定時間的假動畫——
+// 真的還在等（換頁本身、或頁面元件初次資料還沒回來）才有進度條，等到了立刻補滿收掉。
+export function RouteProgress({ isPending }: { isPending: boolean }) {
   const [show, setShow] = useState(false);
-  const first = useRef(true);
+  const [w, setW] = useState(0);
+  const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useEffect(() => {
-    if (first.current) {
-      first.current = false;
-      return;
+    if (isPending) {
+      if (hideTimer.current) clearTimeout(hideTimer.current);
+      setShow(true);
+      setW(18);
+      const t = setTimeout(() => setW(72), 80);
+      return () => clearTimeout(t);
     }
-    setShow(true);
-    setW(18);
-    const t1 = setTimeout(() => setW(72), 80);
-    const t2 = setTimeout(() => setW(100), 400);
-    const t3 = setTimeout(() => {
+    if (!show) return;
+    setW(100);
+    hideTimer.current = setTimeout(() => {
       setShow(false);
       setW(0);
-    }, 750);
+    }, 200);
     return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
+      if (hideTimer.current) clearTimeout(hideTimer.current);
     };
-  }, [path]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isPending]);
+
   if (!show) return null;
   return <div className="kg-routebar" style={{ width: `${w}%` }} aria-hidden="true" />;
 }
@@ -647,23 +651,33 @@ export function useKeyboardInset() {
   return inset;
 }
 
+// 企劃頁殼（project-shell.tsx）的底部四格導覽是 fixed，跟這個 bar 搶同一個 bottom:0——
+// 在殼裡用時傳 inShell，疊在導覽列上面，不要蓋住。導覽列高度含 env(safe-area-inset-bottom)，
+// 這裡用 calc() 一起算，鍵盤彈出時 useKeyboardInset 的 inset 再疊上去。
+const SHELL_NAV_HEIGHT = 60; // 對應 project-shell.tsx 的 min-h-[56px] 項目 + 一點邊距
+
 export function StickySaveBar({
   dirty,
   busy,
   onSave,
   saveLabel = '儲存',
   status,
+  inShell,
 }: {
   dirty: boolean;
   busy: boolean;
   onSave: () => void;
   saveLabel?: string;
   status?: string;
+  inShell?: boolean;
 }) {
   const inset = useKeyboardInset();
   const left = status ?? (busy ? '儲存中…' : dirty ? '● 未儲存' : '已同步');
+  const bottom = inShell && inset === 0
+    ? `calc(${SHELL_NAV_HEIGHT}px + env(safe-area-inset-bottom))`
+    : inset;
   return (
-    <div className="kg-savebar" style={{ bottom: inset }}>
+    <div className="kg-savebar" style={{ bottom }}>
       <div className="mx-auto max-w-2xl flex items-center gap-3">
         <span className={`font-mono2 text-xs ${dirty ? 'text-[#9e4b2c]' : 'text-[#6f6156]'}`}>
           {busy ? '處理中…' : left}

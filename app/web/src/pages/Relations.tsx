@@ -19,13 +19,12 @@ import { PageLoading,
   ErrorBox,
   ExtrasEditor,
   SecLabel,
-  SiteFooter,
-  SiteHeader,
   ThreadLink,
   TokenGate,
   TurnstileWidget,
   toast,
 } from '../components/kg';
+import { ProjectShell } from '../components/project-shell';
 import type { Character, Project, Relation, RelationExtra } from '../lib/types';
 
 export default function RelationsPage({ slug, charId }: { slug: string; charId: string }) {
@@ -69,21 +68,27 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = async () => {
-    const got = await getCharacter(slug, charId);
+    // 1-2：三條查詢彼此不依賴，並行抓
+    const [got, relList, chars] = await Promise.all([
+      getCharacter(slug, charId),
+      relationsForChar(slug, charId),
+      listCharacters(slug),
+    ]);
     setData(got);
     if (!got) return;
-    setRels(await relationsForChar(slug, charId));
-    const chars = await listCharacters(slug);
+    setRels(relList);
     setAllChars(chars);
     setCharMap(new Map(chars.map((c) => [c.id, c])));
   };
 
   useEffect(() => {
     (async () => {
-      const got = await getCharacter(slug, charId);
+      const [got, ok] = await Promise.all([
+        getCharacter(slug, charId),
+        verifyCharToken(slug, charId), // cookie 優先
+      ]);
       setData(got);
       if (!got) return;
-      const ok = await verifyCharToken(slug, charId); // cookie 優先
       if (ok) setToken('cookie');
     })();
   }, [slug, charId]);
@@ -129,29 +134,22 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   }, [allChars, charId, query]);
 
   if (data === undefined) return (
-    <div className="min-h-screen flex flex-col">
-      <SiteHeader />
-      <main className="flex-1">
-        <PageLoading />
-      </main>
-    </div>
+    <ProjectShell slug={slug} title="" active={null}>
+      <PageLoading />
+    </ProjectShell>
   );
   if (data === null) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="font-huninn text-4xl">查無此角色</div>
-        </main>
+      <div className="min-h-screen flex flex-col items-center justify-center px-4">
+        <div className="font-huninn text-4xl">查無此角色</div>
       </div>
     );
   }
 
   if (!token) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1 px-4 sm:px-6 py-16">
+      <ProjectShell slug={slug} title={data.project.title} active={null}>
+        <div className="px-4 sm:px-6 py-16">
           <TokenGate
             title={`「${data.character.name}」的牽線管理`}
             hint="發起與回應牽線需要角色編輯碼（chr_…）。"
@@ -168,9 +166,8 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
               setToken('cookie'); // 已種 cookie
             }}
           />
-        </main>
-        <SiteFooter />
-      </div>
+        </div>
+      </ProjectShell>
     );
   }
 
@@ -278,9 +275,8 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   const target = targetId ? charMap.get(targetId) : undefined;
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <SiteHeader />
-      <main className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
+    <ProjectShell slug={slug} title={data.project.title} active={null}>
+      <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
         <a href={href(`/p/${slug}/c/${charId}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← 回角色頁
         </a>
@@ -657,8 +653,7 @@ id="fld-Relations-5"                 className="kg-input"
             <p className="font-mono2 text-[11px] text-[#6f6156]">＊ 發起時只寫你這側；對方補完後關係才公開。同一對角色只會有一條紀錄。</p>
           </div>
         </section>
-      </main>
-      <SiteFooter />
-    </div>
+      </div>
+    </ProjectShell>
   );
 }

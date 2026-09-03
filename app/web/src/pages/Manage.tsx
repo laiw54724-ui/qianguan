@@ -13,8 +13,6 @@ import {
   PageLoading,
   QaEditor,
   SecLabel,
-  SiteFooter,
-  SiteHeader,
   StickySaveBar,
   TagGroupEditor,
   TokenGate,
@@ -24,6 +22,7 @@ import {
 import { fieldHasContent } from '../lib/fvals';
 import { SocialLinksEditor } from '../components/links';
 import { sanitizeLinks, type SocialLink } from '../lib/links';
+import { ProjectShell } from '../components/project-shell';
 import type { FieldDef, Project, QaItem, TagGroup, WorldBlock } from '../lib/types';
 
 const BUF_KEY = (slug: string) => `pbuf_${slug}`;
@@ -98,13 +97,15 @@ export default function ManagePage({ slug }: { slug: string }) {
   const dirty = authed && snapshot.current !== '' && snapshot.current !== JSON.stringify({ ...currentForm(), joinCode: '' });
 
   const refresh = async () => {
-    const p = await getProject(slug);
+    // 1-2：名單統計跟企劃本身資料無關，並行抓
+    const [p, rows] = await Promise.all([getProject(slug), rosterStats(slug)]);
     setProject(p ?? null);
-    if (p) setRows(await rosterStats(slug));
+    if (p) setRows(rows);
   };
 
   useEffect(() => {
     (async () => {
+      const rosterPromise = rosterStats(slug);
       const p = await getProject(slug);
       setProject(p ?? null);
       if (!p) return;
@@ -117,7 +118,7 @@ export default function ManagePage({ slug }: { slug: string }) {
           visibility: ok.visibility, joinMode: ok.join_mode, joinCode: '', signupsOpen: ok.signups_open,
           worldBlocks: ok.world_blocks, qa: ok.qa, fields: ok.field_schema, tagGroups: ok.tag_groups ?? [], links: ok.links ?? [],
         }) });
-        setRows(await rosterStats(slug));
+        setRows(await rosterPromise);
         // 本機復原緩衝：比伺服器新就問（§12-6）
         const buf = loadBuffer<FormState>(BUF_KEY(slug));
         if (buf && buf.savedAt > ok.updated_at) setRestorable(buf.data);
@@ -203,30 +204,23 @@ export default function ManagePage({ slug }: { slug: string }) {
 
   if (project === undefined) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1">
-          <PageLoading text="正在打開開設者後台…" />
-        </main>
-      </div>
+      <ProjectShell slug={slug} title="" active="settings">
+        <PageLoading text="正在打開開設者後台…" />
+      </ProjectShell>
     );
   }
   if (project === null) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1 flex items-center justify-center">
-          <div className="font-huninn text-4xl">查無此企劃</div>
-        </main>
+      <div className="min-h-screen flex flex-col items-center justify-center px-4">
+        <div className="font-huninn text-4xl">查無此企劃</div>
       </div>
     );
   }
 
   if (!authed) {
     return (
-      <div className="min-h-screen flex flex-col">
-        <SiteHeader />
-        <main className="flex-1 px-4 sm:px-6 py-16">
+      <ProjectShell slug={slug} title={project.title} active="settings">
+        <div className="px-4 sm:px-6 py-16">
           <TokenGate
             title="開設者後台"
             hint="貼上建立企劃時保存的開設者碼。這台裝置驗證過就會記住。"
@@ -246,16 +240,14 @@ export default function ManagePage({ slug }: { slug: string }) {
               setRows(await rosterStats(slug));
             }}
           />
-        </main>
-        <SiteFooter />
-      </div>
+        </div>
+      </ProjectShell>
     );
   }
 
   return (
-    <div className="min-h-screen flex flex-col">
-      <SiteHeader />
-      <main className="kg-form-page mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
+    <ProjectShell slug={slug} title={project.title} active="settings">
+      <div className="kg-form-page mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
         <a href={href(`/p/${slug}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← 回企劃頁
         </a>
@@ -519,9 +511,8 @@ export default function ManagePage({ slug }: { slug: string }) {
           <p className="font-mono2 text-[11px] text-[#6f6156] mt-3">＊ 移除為軟刪除：角色不再公開顯示，紀錄保留以備追溯。</p>
         </section>
         )}
-      </main>
-      <SiteFooter />
-      <StickySaveBar dirty={dirty} busy={saving} onSave={() => { void doSave(); }} />
-    </div>
+      </div>
+      <StickySaveBar inShell dirty={dirty} busy={saving} onSave={() => { void doSave(); }} />
+    </ProjectShell>
   );
 }

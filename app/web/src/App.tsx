@@ -5,6 +5,8 @@ import Poster from './pages/Poster';
 import Home from './pages/Home';
 import NewProject from './pages/NewProject';
 import ProjectPage from './pages/Project';
+import RosterPage from './pages/Roster';
+import MinePage from './pages/Mine';
 import JoinPage from './pages/Join';
 import CharacterPage from './pages/Character';
 import CharEditPage from './pages/CharEdit';
@@ -12,7 +14,7 @@ import RelationsPage from './pages/Relations';
 import ManagePage from './pages/Manage';
 
 export default function App() {
-  const path = useHashPath();
+  const { path, isPending } = useHashPath();
   const seg = path.split('/').filter(Boolean);
 
   // 全域兜底：任何漏接的非同步錯誤（例如儲存空間不足）都用 toast 告知，不靜默
@@ -33,6 +35,8 @@ export default function App() {
   else if (seg[0] === 'p' && seg[1]) {
     const slug = seg[1];
     if (seg.length === 2) page = <ProjectPage slug={slug} />;
+    else if (seg[2] === 'roster') page = <RosterPage slug={slug} />;
+    else if (seg[2] === 'mine') page = <MinePage slug={slug} />;
     else if (seg[2] === 'join') page = <JoinPage slug={slug} />;
     else if (seg[2] === 'manage') page = <ManagePage slug={slug} />;
     else if (seg[2] === 'c' && seg[3]) {
@@ -59,7 +63,7 @@ export default function App() {
       >
         跳到主要內容
       </a>
-      <RouteProgress path={path} />
+      <RouteProgress isPending={isPending} />
       <main id="main" tabIndex={-1} className="outline-none">{page}</main>
       <LeaveGuardHost />
       <Toaster />
