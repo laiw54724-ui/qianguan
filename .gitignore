@@ -13,3 +13,5 @@ worker-configuration.d.ts
 
 # 開發過程中產生的除錯用截圖/log，不是專案內容
 .playwright-mcp/
+
+.worktrees/
