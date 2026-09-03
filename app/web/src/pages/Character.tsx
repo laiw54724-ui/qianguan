@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { acceptedRelations, getCharacter, listCharacters, sideOf, verifyCharToken, type CharacterView } from '../lib/api';
+import { acceptedRelations, getCharacter, listCharacters, rotateCharToken, sideOf, verifyCharToken, type CharacterView } from '../lib/api';
 import { href } from '../lib/nav';
-import { PageLoading, BlockView, CharAvatar, EmptyNote, ErrorBox, FieldView, PreviewModal, SecLabel, ThreadLink, type PreviewTarget, type RosterLite } from '../components/kg';
+import { PageLoading, BlockView, CharAvatar, EmptyNote, ErrorBox, FieldView, PreviewModal, SecLabel, ThreadLink, TokenReveal, toast, type PreviewTarget, type RosterLite } from '../components/kg';
 import { SocialLinkChips } from '../components/links';
 import { ProjectShell } from '../components/project-shell';
 import type { Character, Relation } from '../lib/types';
@@ -16,6 +16,9 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
   const [claimError, setClaimError] = useState<string | null>(null);
   const [claimOpen, setClaimOpen] = useState(false);
   const [preview, setPreview] = useState<{ block: PreviewTarget; idx: number } | null>(null);
+  // 1-4：重看編輯碼——不是找回原本那組（權杖只存雜湊拿不回來），是換發一組新的
+  const [newToken, setNewToken] = useState<string | null>(null);
+  const [rotating, setRotating] = useState(false);
 
   const refresh = async () => {
     // 1-2：三條查詢彼此不依賴，並行抓，不要排隊
@@ -74,6 +77,21 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
     refresh();
   };
 
+  const doRotate = async () => {
+    if (!window.confirm('重新產生編輯碼會讓舊的那組失效（這台裝置會自動換成新的，不影響現在的存取）。確定要繼續嗎？')) return;
+    setRotating(true);
+    try {
+      const res = await rotateCharToken(slug, charId);
+      if (!res.ok) {
+        toast(res.error, 'err');
+        return;
+      }
+      setNewToken(res.charToken);
+    } finally {
+      setRotating(false);
+    }
+  };
+
   return (
     <ProjectShell slug={slug} title={project.title} active={null}>
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
@@ -118,6 +136,9 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
                   <a href={href(`/p/${slug}/c/${charId}/relations`)} className="kg-pill kg-pill-sm kg-pill-sage">
                     牽線管理
                   </a>
+                  <button type="button" className="kg-pill kg-pill-sm kg-pill-ghost" disabled={rotating} onClick={() => { void doRotate(); }}>
+                    {rotating ? '產生中…' : '重看編輯碼'}
+                  </button>
                 </>
               ) : character.slot ? (
                 <a href={href(`/p/${slug}/join?claim=${encodeURIComponent(character.name)}`)} className="kg-pill kg-pill-sm kg-pill-red">
@@ -145,6 +166,16 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
             )}
           </div>
         </div>
+
+        {newToken && (
+          <div className="mt-6 max-w-md">
+            <TokenReveal kind="char" token={newToken} note="這組取代了舊的編輯碼；舊的那組現在已經失效。">
+              <button type="button" className="kg-pill" onClick={() => setNewToken(null)}>
+                好，關掉這張卡
+              </button>
+            </TokenReveal>
+          </div>
+        )}
 
         {filledFields.length > 0 && (
           <section className="mt-10 kg-rise" style={{ animationDelay: '0.08s' }}>

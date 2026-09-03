@@ -91,6 +91,8 @@ export const characterPatchSchema = z.object({
   tags: z.array(str(40)).max(40).optional(),
 });
 
+export const shareNoteSchema = z.object({ note: str(140) });
+
 export const draftCharSchema = z.object({ name: str(40) });
 
 export const tokenSchema = z.object({ token: optStr(128) });

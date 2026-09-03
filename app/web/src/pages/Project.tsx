@@ -31,9 +31,12 @@ function FeedItem({ ev, chars }: { ev: KgEvent; chars: Map<string, Character> })
       );
       break;
     case 'char_updated':
+      // 1-3：現在只有使用者自己選擇分享才會有這則動態，payload.note 是他填的那句話；
+      // 舊資料（改版前自動產生、沒有 note）保留原本的通用文字當備援。
       body = (
         <>
-          <NameTag c={actor} fallback={ev.payload.name} /> 更新了角色卡
+          <NameTag c={actor} fallback={ev.payload.name} />{' '}
+          {ev.payload.note ? <>說：「{ev.payload.note}」</> : '更新了角色卡'}
         </>
       );
       break;

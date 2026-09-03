@@ -7,7 +7,7 @@ import { and, eq, ne } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { characters, events, type CharacterRow } from '../db/schema';
 import { AUTH_FAIL, genPublicId, genToken, normJoinCode, sha256hex } from '../auth/token';
-import { charCookieLine, resolveToken } from '../auth/guard';
+import { charCookieLine, charCookieLineRotate, charTokens, resolveToken } from '../auth/guard';
 import { getProjectRaw } from './project';
 import { fromJson, sanitizeLinks, sanitizeTags, type WorldBlock } from './shapes';
 
@@ -160,18 +160,74 @@ export async function patchChar(
   if (activating) set.status = 'active';
   const name = (set.name as string) ?? c.name;
 
-  await db.batch([
-    db.update(characters).set(set).where(eq(characters.id, c.id)).returning(),
-    db.insert(events).values({
-      projectId: p.id,
-      type: activating ? 'char_joined' : 'char_updated',
-      actorId: c.id,
-      targetId: null,
-      payload: { name },
-      createdAt: now,
-    }).returning(),
-  ]);
+  // 1-3：加入是公開行為，char_joined 照舊自動發；「更新了角色卡」不再自動發——
+  // 有些人不想被自動追蹤動態。要分享用獨立的 shareCharUpdate()（存檔後才問，
+  // 使用者自己決定要不要送），單純存檔不再順便產生動態。
+  const updateStmt = db.update(characters).set(set).where(eq(characters.id, c.id)).returning();
+  if (activating) {
+    await db.batch([
+      updateStmt,
+      db.insert(events).values({
+        projectId: p.id, type: 'char_joined', actorId: c.id, targetId: null,
+        payload: { name }, createdAt: now,
+      }).returning(),
+    ]);
+  } else {
+    await updateStmt;
+  }
   return { ok: true, updated_at: now };
+}
+
+// ---- 1-3：存檔後才問的「要不要跟大家說一聲？」——獨立端點，只發事件，
+// 不重送整張角色卡（存檔那次早就送過了，這裡只差一句話要不要公開）----
+
+export async function shareCharUpdate(
+  db: DB,
+  slug: string,
+  charId: string,
+  note: string,
+): Promise<{ ok: true } | { error: string }> {
+  const trimmed = note.trim();
+  if (!trimmed) return { error: '請填一句話再分享' };
+  const got = await getChar(db, slug, charId);
+  if (!got) return { error: AUTH_FAIL };
+  const { project: p, character: c } = got;
+  await db.insert(events).values({
+    projectId: p.id, type: 'char_updated', actorId: c.id, targetId: null,
+    payload: { name: c.name, note: trimmed.slice(0, 140) }, createdAt: Date.now(),
+  });
+  return { ok: true };
+}
+
+// ---- 1-4：重看編輯碼（重新產生一組新的，不是找回原本那組——原始權杖只存雜湊，
+// 拿不回來；但使用者當下就在自己的角色頁，等於已經驗過身分，直接發一組新的
+// 讓他重新抄一次，跟貼碼救援達到同樣效果，體感更順）----
+
+export async function rotateCharToken(
+  db: DB,
+  slug: string,
+  charId: string,
+  cookieHeader: string | undefined,
+): Promise<{ character: ReturnType<typeof toChar>; charToken: string; cookie: string } | { error: string }> {
+  const got = await getChar(db, slug, charId);
+  if (!got) return { error: AUTH_FAIL };
+  const { project: p, character: c } = got;
+  let oldToken: string | null = null;
+  for (const t of charTokens(cookieHeader, p.id)) {
+    if ((await sha256hex(t)) === c.editTokenHash) { oldToken = t; break; }
+  }
+  if (!oldToken) return { error: AUTH_FAIL };
+
+  const newToken = genToken('chr');
+  const now = Date.now();
+  await db.update(characters).set({ editTokenHash: await sha256hex(newToken), updatedAt: now })
+    .where(eq(characters.id, c.id));
+  const updated = (await getCharRaw(db, p.id, c.id))!;
+  return {
+    character: toChar(updated),
+    charToken: newToken,
+    cookie: charCookieLineRotate(slug, p.id, cookieHeader, oldToken, newToken),
+  };
 }
 
 // ---- 移除（soft-delete，§6.8；開設者操作，權杖在路由層驗）----

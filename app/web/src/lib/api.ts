@@ -205,6 +205,20 @@ export async function updateCharacter(slug: string, charId: string, _token: stri
   return tryReq('PATCH', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}`, patch);
 }
 
+// 1-3：存檔後才問的「要不要跟大家說一聲？」，獨立於存檔本身，使用者自己決定要不要送
+export async function shareCharUpdate(slug: string, charId: string, note: string): Promise<Result> {
+  return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/share`, { note });
+}
+
+// 1-4：重看編輯碼——換發一組新的（不是找回原本那組，權杖只存雜湊拿不回來），
+// 前提是目前這個瀏覽器已經持有這隻角色有效的 kg_c_ cookie。
+export async function rotateCharToken(
+  slug: string,
+  charId: string,
+): Promise<{ ok: true; character: Character; charToken: string } | { ok: false; error: string }> {
+  return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/rotate-token`, {});
+}
+
 export async function createDraftCharacter(
   slug: string,
   charId: string,

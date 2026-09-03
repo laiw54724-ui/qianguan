@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getCharacter, listCharacters, updateCharacter, verifyCharToken, type CharacterView } from '../lib/api';
+import { getCharacter, listCharacters, shareCharUpdate, updateCharacter, verifyCharToken, type CharacterView } from '../lib/api';
 import { href } from '../lib/nav';
 import { clearBuffer, loadBuffer, saveBuffer, useLeaveGuard } from '../lib/dirty';
 import {
@@ -9,7 +9,9 @@ import {
   ImageField,
   ImeInput,
   PageLoading,
+  SAVEBAR_HEIGHT,
   SecLabel,
+  SHELL_NAV_HEIGHT,
   SheetableField,
   StickySaveBar,
   TagPicker,
@@ -57,6 +59,10 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
   const [mode, setMode] = useState<BlockEditorMode>('fill');
   const [sec, setSec] = useState<'links' | 'fields' | 'tags' | ''>('fields');
   const [seedOpen, setSeedOpen] = useState<string | null>(null);
+  // 1-3：存檔後才問，不是存檔當下——「加入了」已經公開過一次，這裡只問後續的更新
+  const [sharePrompt, setSharePrompt] = useState(false);
+  const [shareNote, setShareNote] = useState('');
+  const [sharing, setSharing] = useState(false);
   const snapshot = useRef('');
   const serverForm = useRef<FormState | null>(null);
 
@@ -139,6 +145,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
       }
     }
     setBusy(true);
+    const wasDraft = data.character.status === 'draft'; // 存檔前先記，存檔後 data 就變了
     try {
       const res = await updateCharacter(slug, charId, '', {
         name: name.trim(),
@@ -162,12 +169,31 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
       toast('✓ 已儲存，角色頁現在是新內容');
       const got = await getCharacter(slug, charId);
       if (got) setData(got);
+      // 1-3：「加入了」這次存檔已經自動公開過一次，不用再問；
+      // 之後的每次存檔才問要不要順便說一聲，預設不問就是不發。
+      if (!wasDraft) setSharePrompt(true);
       return true;
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : '儲存失敗，請稍後再試');
       return false;
     } finally {
       setBusy(false);
+    }
+  };
+
+  const doShare = async () => {
+    setSharing(true);
+    try {
+      const res = await shareCharUpdate(slug, charId, shareNote.trim());
+      if (!res.ok) {
+        toast(res.error, 'err');
+        return;
+      }
+      toast('✓ 已經跟大家說一聲了');
+      setSharePrompt(false);
+      setShareNote('');
+    } finally {
+      setSharing(false);
     }
   };
 
@@ -383,6 +409,37 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
         )}
       </div>
       <StickySaveBar inShell dirty={dirty} busy={busy} onSave={() => { void doSave(); }} />
+      {sharePrompt && (
+        <div
+          className="fixed inset-x-0 z-40 flex justify-center px-4"
+          style={{ bottom: `calc(${SHELL_NAV_HEIGHT + SAVEBAR_HEIGHT}px + env(safe-area-inset-bottom) + 8px)` }}
+        >
+          <div className="kg-card w-full max-w-md p-4 flex flex-wrap items-center gap-3">
+            <span className="text-sm font-bold shrink-0">要不要跟大家說一聲？</span>
+            <input
+              className="kg-input flex-1 min-w-[10rem]"
+              value={shareNote}
+              onChange={(e) => setShareNote(e.target.value)}
+              placeholder="例：補了背景故事"
+              maxLength={140}
+              autoFocus
+            />
+            <div className="flex gap-2 ml-auto">
+              <button type="button" className="kg-pill kg-pill-sm kg-pill-ghost" onClick={() => { setSharePrompt(false); setShareNote(''); }}>
+                不用了
+              </button>
+              <button
+                type="button"
+                className="kg-pill kg-pill-sm kg-pill-red"
+                disabled={!shareNote.trim() || sharing}
+                onClick={() => { void doShare(); }}
+              >
+                {sharing ? '送出中…' : '分享這次更新'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </ProjectShell>
   );
 }

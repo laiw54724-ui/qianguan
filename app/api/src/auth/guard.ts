@@ -45,6 +45,20 @@ export function ownerCookieLine(slug: string, projectId: string, token: string):
   return cookieLine(`kg_o_${projectId}`, token, slug);
 }
 
+/** 1-4「重看編輯碼」：把 oldToken 從清單換成 newToken，不是單純 append——
+ * 否則舊碼還留在清單裡繼續有效，失去「重新產生就讓舊碼失效」的意義。 */
+export function charCookieLineRotate(
+  slug: string,
+  projectId: string,
+  cookieHeader: string | undefined,
+  oldToken: string,
+  newToken: string,
+): string {
+  const tokens = charTokens(cookieHeader, projectId).filter((t) => t !== oldToken);
+  tokens.push(newToken);
+  return cookieLine(`kg_c_${projectId}`, tokens.join('.'), slug);
+}
+
 /**
  * 取權杖：body.token（貼碼救援）優先，其次 cookie；回傳是否該順手種 cookie。
  * 雜湊比對（SHA-256 hex），無時序攻擊價值，不需要 constant-time。

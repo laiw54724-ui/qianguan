@@ -362,6 +362,9 @@ export function TokenReveal({
   children?: ReactNode;
 }) {
   const [copied, setCopied] = useState(false);
+  // 1-4：手機上按複製、切去 Discord 貼連結，剪貼簿常被蓋掉——勾了才能繼續，
+  // 逼使用者在離開這個畫面前，實際確認自己已經存好（抄下來／截圖／存進密碼管理器都算）。
+  const [confirmed, setConfirmed] = useState(false);
   const copy = async () => {
     try {
       await navigator.clipboard.writeText(token);
@@ -396,8 +399,18 @@ export function TokenReveal({
         <button type="button" className="kg-pill kg-pill-ink" onClick={copy}>
           {copied ? '✓ 已複製' : '複製權杖'}
         </button>
+      </div>
+      <label className="flex items-center gap-2.5 text-sm font-bold cursor-pointer select-none mt-5 pt-5 border-t border-dashed border-[#e8dfd4]">
+        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="w-5 h-5 accent-[#9e4b2c]" />
+        我已經存好了
+      </label>
+      <div
+        className={`flex flex-wrap gap-3 mt-4 transition-opacity ${confirmed ? '' : 'opacity-40 pointer-events-none'}`}
+        aria-disabled={!confirmed}
+      >
         {children}
       </div>
+      {!confirmed && <p className="mt-2 text-xs text-[#a8455e]">＊ 先勾選「我已經存好了」才能繼續</p>}
       {note && <p className="mt-4 text-xs text-[#6f6156]">{note}</p>}
     </div>
   );
@@ -654,7 +667,8 @@ export function useKeyboardInset() {
 // 企劃頁殼（project-shell.tsx）的底部四格導覽是 fixed，跟這個 bar 搶同一個 bottom:0——
 // 在殼裡用時傳 inShell，疊在導覽列上面，不要蓋住。導覽列高度含 env(safe-area-inset-bottom)，
 // 這裡用 calc() 一起算，鍵盤彈出時 useKeyboardInset 的 inset 再疊上去。
-const SHELL_NAV_HEIGHT = 60; // 對應 project-shell.tsx 的 min-h-[56px] 項目 + 一點邊距
+export const SHELL_NAV_HEIGHT = 60; // 對應 project-shell.tsx 的 min-h-[56px] 項目 + 一點邊距
+export const SAVEBAR_HEIGHT = 64; // .kg-savebar 的實際高度估值，給疊更上層的元件（如分享提示）算位置用
 
 export function StickySaveBar({
   dirty,

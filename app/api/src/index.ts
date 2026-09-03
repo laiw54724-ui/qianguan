@@ -234,6 +234,36 @@ app.patch('/api/p/:slug/c/:charId', async (c) => {
   return c.json(r);
 });
 
+// 1-3：存檔後才問的「要不要跟大家說一聲？」——只發動態事件，不動角色欄位本身
+app.post('/api/p/:slug/c/:charId/share', async (c) => {
+  const d = db(c);
+  const slug = c.req.param('slug');
+  const charId = c.req.param('charId');
+  if (!(await requireChar(d, slug, charId, cookieOf(c)))) {
+    return c.json({ error: AUTH_FAIL }, 401);
+  }
+  const input = await parseBody(c, schema.shareNoteSchema);
+  if (!input) return c.json({ error: '參數格式不正確' }, 400);
+  const r = await charSvc.shareCharUpdate(d, slug, charId, input.note);
+  if ('error' in r) return c.json({ error: r.error }, 400);
+  return c.json(r);
+});
+
+// 1-4「重看編輯碼」：已經持有有效 kg_c_ cookie（人已經在自己的角色頁），
+// 不用再貼一次碼，直接發一組新的權杖取代舊的（舊碼因此失效，見 auth/guard.ts）
+app.post('/api/p/:slug/c/:charId/rotate-token', async (c) => {
+  const d = db(c);
+  const slug = c.req.param('slug');
+  const charId = c.req.param('charId');
+  if (!(await requireChar(d, slug, charId, cookieOf(c)))) {
+    return c.json({ error: AUTH_FAIL }, 401);
+  }
+  const r = await charSvc.rotateCharToken(d, slug, charId, cookieOf(c));
+  if ('error' in r) return c.json({ error: r.error }, 401);
+  c.header('Set-Cookie', r.cookie, { append: true });
+  return c.json({ ok: true, character: r.character, charToken: r.charToken });
+});
+
 app.post('/api/p/:slug/c/:charId/draft-char', async (c) => {
   const d = db(c);
   if (!(await requireChar(d, c.req.param('slug'), c.req.param('charId'), cookieOf(c)))) {
