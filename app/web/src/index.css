@@ -1,0 +1,410 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* 牽關品牌色票 v2（辭典紙本風） */
+    --ochre: #9e4b2c; /* 主色：標題、主要按鈕、logo */
+    --ochre-deep: #8a3f23; /* 主色 hover */
+    --cyan: #7fc0dc; /* 僅填色：標籤底、卡片區塊 */
+    --cyan-soft: #e9f3f9; /* 天青淡洗：hover、大區塊底 */
+    --cyan-deep: #24697f; /* 連結、可點擊文字、系統狀態 */
+    --rose: #f5aebd; /* 僅填色：關係標籤、已成立的線 */
+    --rose-soft: #fcebf0; /* 櫻色淡洗 */
+    --rose-deep: #a8455e; /* 關係相關文字、待回應狀態 */
+    --paper: #fbf8f3; /* 頁面底 */
+    --rule: #e8dfd4; /* 界：分隔線、卡片邊框 */
+    --ink: #33261e; /* 墨：主文字 */
+    --body: #4a3b31; /* 次主文字 */
+    --ink-soft: #6f6156; /* 次文字：ID、時間、說明 */
+    --placeholder: #7a6f63;
+
+    /* 相容別名（舊 class 仍指向這些名字） */
+    --bg: var(--paper);
+    --card: #ffffff;
+    --line: var(--rule);
+    --line-blue: var(--rule);
+    --blue: var(--ochre);
+    --blue-deep: var(--ochre-deep);
+    --blue-soft: var(--cyan-soft);
+    --red: var(--rose-deep);
+    --yellow: var(--rose);
+    --yellow-soft: var(--rose-soft);
+  }
+
+  html {
+    scroll-behavior: smooth;
+  }
+
+  body {
+    background-color: var(--paper);
+    color: var(--ink);
+    font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+    font-size: 15px;
+    line-height: 1.75;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  ::selection {
+    background: var(--rose);
+    color: var(--ink);
+  }
+
+  *:focus-visible {
+    outline: 2px solid var(--cyan-deep);
+    outline-offset: 2px;
+  }
+
+  /* skip link：平常藏起來，鍵盤聚焦時浮出 */
+  .kg-skiplink {
+    position: fixed;
+    top: -48px;
+    left: 12px;
+    z-index: 100;
+    padding: 8px 16px;
+    border-radius: 9999px;
+    border: 2px solid var(--line);
+    background: var(--paper);
+    color: var(--ink);
+    font-weight: 700;
+    transition: top 0.15s ease;
+  }
+  .kg-skiplink:focus-visible {
+    top: 12px;
+  }
+
+  /* hash 錨點不被固定 header 遮住 */
+  [id] {
+    scroll-margin-top: 84px;
+  }
+
+  /* 可折疊卡片区（details/summary） */
+  .kg-collapse > summary {
+    list-style: none;
+  }
+  .kg-collapse > summary::-webkit-details-marker {
+    display: none;
+  }
+  .kg-collapse > summary {
+    border-radius: 12px;
+  }
+  .kg-collapse .kg-chevron {
+    display: inline-block;
+    transition: transform 0.15s ease;
+  }
+  .kg-collapse[open] .kg-chevron {
+    transform: rotate(180deg);
+  }
+
+  @media (min-width: 560px) {
+    body {
+      font-size: 16px;
+    }
+  }
+}
+
+@layer components {
+  /* 品牌字（logo / 主標）— Noto Serif TC */
+  .font-logo {
+    font-family: 'Noto Serif TC', 'Noto Sans TC', serif;
+    font-weight: 600;
+    letter-spacing: 0.1em;
+  }
+
+  /* 標題襯線（舊 .font-huninn 用途：節標題） */
+  .font-huninn {
+    font-family: 'Noto Serif TC', 'Noto Sans TC', serif;
+    font-weight: 600;
+  }
+  .font-display {
+    font-family: 'Noto Sans TC', 'PingFang TC', 'Microsoft JhengHei', system-ui, sans-serif;
+  }
+  .font-mono2 {
+    font-family: 'JetBrains Mono', 'Noto Sans TC', monospace;
+  }
+
+  /* 膠囊按鈕 */
+  .kg-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5em;
+    border: 1.5px solid var(--rule);
+    border-radius: 999px;
+    padding: 0.55em 1.35em;
+    font-family: 'Noto Sans TC', system-ui, sans-serif;
+    font-weight: 500;
+    font-size: 0.95rem;
+    letter-spacing: 0.04em;
+    line-height: 1;
+    background: #fff;
+    color: var(--ink);
+    cursor: pointer;
+    transition: transform 0.15s ease, background-color 0.15s, color 0.15s, border-color 0.15s;
+    user-select: none;
+    text-decoration: none;
+  }
+  .kg-pill:hover {
+    border-color: var(--ochre);
+    color: var(--ochre);
+    transform: translateY(-1px);
+  }
+  .kg-pill:active {
+    transform: translateY(0);
+  }
+  .kg-pill-red {
+    background: var(--ochre);
+    border-color: var(--ochre);
+    color: var(--paper);
+  }
+  .kg-pill-red:hover {
+    background: var(--ochre-deep);
+    border-color: var(--ochre-deep);
+    color: var(--paper);
+  }
+  .kg-pill-ink {
+    background: var(--ink);
+    border-color: var(--ink);
+    color: var(--paper);
+  }
+  .kg-pill-ink:hover {
+    background: var(--ochre);
+    border-color: var(--ochre);
+    color: var(--paper);
+  }
+  .kg-pill-sage {
+    background: var(--cyan-soft);
+    border-color: transparent;
+    color: var(--cyan-deep);
+  }
+  .kg-pill-ghost {
+    background: transparent;
+    border-color: transparent;
+    color: var(--ink-soft);
+  }
+  .kg-pill-sm {
+    padding: 0.4em 1em;
+    font-size: 0.82rem;
+  }
+  .kg-pill:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+    transform: none;
+  }
+
+  /* 卡片：白底細邊 */
+  .kg-card {
+    background: var(--card);
+    border: 1.5px solid var(--rule);
+    border-radius: 14px;
+    box-shadow: 0 1px 3px rgba(51, 38, 30, 0.05);
+  }
+  .kg-card-flat {
+    background: var(--card);
+    border: 1.5px solid var(--rule);
+    border-radius: 14px;
+  }
+
+  .kg-input,
+  .kg-textarea,
+  .kg-select {
+    width: 100%;
+    background: #fff;
+    border: 1.5px solid var(--rule);
+    border-radius: 9px;
+    padding: 0.6em 0.85em;
+    font-size: 0.95rem;
+    color: var(--ink);
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  /* 下拉選單：自繪箭頭，右側留足空間 */
+  .kg-select {
+    padding-right: 2.4em;
+    appearance: none;
+    -webkit-appearance: none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%236b6459' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 0.8em center;
+  }
+  .kg-input::placeholder,
+  .kg-textarea::placeholder {
+    color: var(--placeholder);
+  }
+  .kg-input:focus,
+  .kg-textarea:focus,
+  .kg-select:focus {
+    outline: none;
+    border-color: transparent;
+    box-shadow: 0 0 0 2px var(--cyan-deep);
+  }
+  .kg-textarea {
+    resize: vertical;
+    min-height: 5.5em;
+  }
+  .kg-label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    margin-bottom: 0.35em;
+    color: var(--body);
+  }
+  .kg-label .req {
+    color: var(--rose-deep);
+  }
+
+  /* 括號節標籤 （名單） */
+  .kg-seclabel {
+    font-family: 'JetBrains Mono', 'Noto Sans TC', monospace;
+    font-size: 0.75rem;
+    font-weight: 600;
+    letter-spacing: 0.14em;
+    color: var(--cyan-deep);
+    text-transform: uppercase;
+  }
+
+  .kg-tag {
+    display: inline-flex;
+    align-items: center;
+    border-radius: 999px;
+    padding: 0.15em 0.7em;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.05em;
+    background: var(--cyan);
+    color: #173f4d;
+  }
+
+  .kg-hr {
+    border: none;
+    border-top: 1.5px dashed var(--rule);
+  }
+
+  /* 跑馬燈 */
+  @keyframes kg-marquee {
+    from {
+      transform: translateX(0);
+    }
+    to {
+      transform: translateX(-50%);
+    }
+  }
+  .kg-marquee-track {
+    display: flex;
+    width: max-content;
+    animation: kg-marquee 22s linear infinite;
+  }
+
+  /* 紅線輕擺 */
+  @keyframes kg-sway {
+    0%,
+    100% {
+      transform: translateY(0);
+    }
+    50% {
+      transform: translateY(-6px);
+    }
+  }
+
+  /* 進場 */
+  @keyframes kg-rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  .kg-rise {
+    animation: kg-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+
+  /* 權杖揭示框 */
+  .kg-token-box {
+    font-family: 'JetBrains Mono', monospace;
+    word-break: break-all;
+    background: var(--ink);
+    color: #e8dfd4;
+    border-radius: 9px;
+    padding: 1em 1.2em;
+    font-size: 1.02rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+  }
+
+  /* Toast 回饋 */
+  @keyframes kg-toast-in {
+    from {
+      opacity: 0;
+      transform: translateY(10px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+  .kg-toast {
+    pointer-events: auto;
+    background: var(--paper);
+    border: 2px solid var(--rule);
+    border-left: 4px solid var(--cyan-deep);
+    border-radius: 10px;
+    box-shadow: 0 10px 28px rgba(51, 38, 30, 0.16);
+    color: var(--ink);
+    font-size: 0.92rem;
+    font-weight: 700;
+    padding: 0.7em 1.1em;
+    animation: kg-toast-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both;
+  }
+  .kg-toast-err {
+    border-left-color: var(--rose-deep);
+    color: var(--rose-deep);
+  }
+
+  /* 載入動畫：logo 呼吸＋不定進度條 */
+  @keyframes kg-pulse {
+    0%,
+    100% {
+      opacity: 0.55;
+      transform: scale(0.94);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  .kg-pulse {
+    animation: kg-pulse 1.2s ease-in-out infinite;
+  }
+  @keyframes kg-slide {
+    from {
+      transform: translateX(-130%);
+    }
+    to {
+      transform: translateX(430%);
+    }
+  }
+  .kg-progress-ind {
+    animation: kg-slide 1.05s ease-in-out infinite;
+  }
+
+  /* 換頁頂部進度條 */
+  .kg-routebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 2px;
+    z-index: 80;
+    background: var(--ochre);
+    transition: width 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    * {
+      transition: none !important;
+      animation: none !important;
+    }
+  }
+}

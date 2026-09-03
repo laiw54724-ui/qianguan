@@ -1,0 +1,15 @@
+node_modules/
+dist/
+.wrangler/
+.DS_Store
+*.log
+worker-configuration.d.ts
+
+# 環境變數：VITE_TURNSTILE_SITEKEY 本身是公開值（sitekey 不是 secret），
+# 但仍照慣例不進版控——用 .env.production.example 記錄要填什麼。
+.env
+.env.*
+!.env.*.example
+
+# 開發過程中產生的除錯用截圖/log，不是專案內容
+.playwright-mcp/

@@ -1,0 +1,30 @@
+{
+  "name": "qianguan-api",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev --port 8787",
+    "deploy": "wrangler deploy",
+    "db:gen": "drizzle-kit generate",
+    "db:apply:local": "wrangler d1 migrations apply qianguan --local",
+    "db:apply": "wrangler d1 migrations apply qianguan --remote",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "drizzle-orm": "^0.44.5",
+    "hono": "^4.9.7",
+    "zod": "^4.1.11"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-plugin": "^1.1.3",
+    "@cloudflare/workers-types": "^4.20250927.0",
+    "@vitest/runner": "^4.1.11",
+    "@vitest/snapshot": "^4.1.11",
+    "drizzle-kit": "^0.31.5",
+    "typescript": "~5.9.3",
+    "vitest": "^4.1.11",
+    "wrangler": "^4.40.0"
+  }
+}
