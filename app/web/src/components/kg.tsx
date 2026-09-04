@@ -1,6 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState, type FocusEvent, type FormEvent, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
-import { href, installLinkNavigation } from '../lib/nav';
+import { href, installLinkNavigation, navigate } from '../lib/nav';
 import { getPendingPath, resolveLeave, subscribeLeaveGuard } from '../lib/dirty';
+import { getMe, logout } from '../lib/api';
 
 // ---------- 頭像 ----------
 // 無上傳圖時：依角色名生成專屬色塊頭像（品牌雙圓／幾何塊，與 logo 同源）
@@ -226,6 +227,15 @@ export function SecLabel({ children }: { children: ReactNode }) {
 
 // ---------- 頁首 ----------
 export function SiteHeader() {
+  const [me, setMe] = useState<string | null | undefined>(undefined);
+  useEffect(() => {
+    getMe().then(setMe);
+  }, []);
+  const doLogout = async () => {
+    await logout();
+    setMe(null);
+    navigate('/home');
+  };
   return (
     <header className="sticky top-0 z-40 border-b-2 border-[#e8dfd4] bg-[#fbf8f3]/95 backdrop-blur-sm">
       <div className="mx-auto max-w-6xl px-4 sm:px-6 h-16 flex items-center justify-between">
@@ -239,9 +249,25 @@ export function SiteHeader() {
           <a href={href('/home')} className="kg-pill kg-pill-ghost kg-pill-sm">
             首頁
           </a>
+          {me && (
+            <a href={href('/dashboard')} className="kg-pill kg-pill-ghost kg-pill-sm">
+              我的總覽
+            </a>
+          )}
           <a href={href('/new')} className="kg-pill kg-pill-red kg-pill-sm">
             ＋ 建立企劃
           </a>
+          {me !== undefined && (
+            me ? (
+              <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm" onClick={() => { void doLogout(); }}>
+                登出
+              </button>
+            ) : (
+              <a href={`/api/auth/discord/login?next=${encodeURIComponent(window.location.pathname)}`} className="kg-pill kg-pill-ghost kg-pill-sm">
+                用 Discord 登入
+              </a>
+            )
+          )}
         </nav>
       </div>
     </header>
@@ -280,141 +306,6 @@ export function Marquee({ items }: { items: string[] }) {
   );
 }
 
-// ---------- Turnstile 正式元件 ----------
-// 規格 §6.7：三處掛載（建立企劃／加入企劃／發起牽線）。VITE_TURNSTILE_SITEKEY 有設定時載入
-// 真正的 Cloudflare Widget 並把 cf-turnstile-response token 交給呼叫端；沒設定（本機開發）時
-// 不渲染元件，直接以 'dev-bypass' 當 token——這個 fallback 只在後端也沒設 TURNSTILE_SECRET 時
-// 才會真的放行，兩邊必須同步，見《後端串接文件》第二節。呼叫端可用 TURNSTILE_REQUIRED 判斷
-// 目前是否真的需要使用者完成驗證（本機開發沒設 sitekey 時免驗）。
-declare global {
-  interface Window {
-    turnstile?: {
-      render: (container: HTMLElement, options: Record<string, unknown>) => string;
-      reset: (widgetId?: string) => void;
-      remove: (widgetId?: string) => void;
-    };
-  }
-}
-
-const TURNSTILE_SITEKEY = (import.meta.env.VITE_TURNSTILE_SITEKEY as string | undefined) || '';
-let turnstileScriptPromise: Promise<void> | null = null;
-
-function loadTurnstileScript(): Promise<void> {
-  if (window.turnstile) return Promise.resolve();
-  if (!turnstileScriptPromise) {
-    turnstileScriptPromise = new Promise((resolve, reject) => {
-      const el = document.createElement('script');
-      el.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js';
-      el.async = true;
-      el.defer = true;
-      el.onload = () => resolve();
-      el.onerror = () => reject(new Error('turnstile script load failed'));
-      document.head.appendChild(el);
-    });
-  }
-  return turnstileScriptPromise;
-}
-
-export const TURNSTILE_REQUIRED = Boolean(TURNSTILE_SITEKEY);
-
-export function TurnstileWidget({ token, onChange }: { token: string; onChange: (v: string) => void }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const widgetId = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!TURNSTILE_SITEKEY) {
-      if (!token) onChange('dev-bypass');
-      return;
-    }
-    let cancelled = false;
-    loadTurnstileScript()
-      .then(() => {
-        if (cancelled || !ref.current || !window.turnstile) return;
-        widgetId.current = window.turnstile.render(ref.current, {
-          sitekey: TURNSTILE_SITEKEY,
-          callback: (t: string) => onChange(t),
-          'expired-callback': () => onChange(''),
-          'error-callback': () => onChange(''),
-        });
-      })
-      .catch(() => onChange(''));
-    return () => {
-      cancelled = true;
-      if (widgetId.current && window.turnstile) window.turnstile.remove(widgetId.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  if (!TURNSTILE_SITEKEY) return null;
-  return <div ref={ref} />;
-}
-
-// ---------- 權杖揭示 ----------
-export function TokenReveal({
-  kind,
-  token,
-  note,
-  children,
-}: {
-  kind: 'owner' | 'char';
-  token: string;
-  note?: string;
-  children?: ReactNode;
-}) {
-  const [copied, setCopied] = useState(false);
-  // 1-4：手機上按複製、切去 Discord 貼連結，剪貼簿常被蓋掉——勾了才能繼續，
-  // 逼使用者在離開這個畫面前，實際確認自己已經存好（抄下來／截圖／存進密碼管理器都算）。
-  const [confirmed, setConfirmed] = useState(false);
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(token);
-    } catch {
-      const ta = document.createElement('textarea');
-      ta.value = token;
-      document.body.appendChild(ta);
-      ta.select();
-      document.execCommand('copy');
-      ta.remove();
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
-  };
-  return (
-    <div className="kg-card p-6 sm:p-8 kg-rise">
-      <div className="flex items-center gap-3 mb-4">
-        <span className="kg-tag" style={{ background: '#7fc0dc' }}>
-          只顯示這一次
-        </span>
-        <h2 className="font-huninn text-xl">
-          {kind === 'owner' ? '開設者碼' : '角色編輯碼'}
-        </h2>
-      </div>
-      <p className="text-sm text-[#6f6156] mb-4 leading-relaxed">
-        {kind === 'owner'
-          ? '這是管理此企劃的唯一憑證。遺失後無法找回，請立即抄下保存。'
-          : '這是編輯此角色、發起與回應牽線的唯一憑證。遺失後無法找回，請立即抄下保存。'}
-      </p>
-      <div className="kg-token-box">{token}</div>
-      <div className="flex flex-wrap gap-3 mt-5">
-        <button type="button" className="kg-pill kg-pill-ink" onClick={copy}>
-          {copied ? '✓ 已複製' : '複製權杖'}
-        </button>
-      </div>
-      <label className="flex items-center gap-2.5 text-sm font-bold cursor-pointer select-none mt-5 pt-5 border-t border-dashed border-[#e8dfd4]">
-        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} className="w-5 h-5 accent-[#9e4b2c]" />
-        我已經存好了
-      </label>
-      <div
-        className={`flex flex-wrap gap-3 mt-4 transition-opacity ${confirmed ? '' : 'opacity-40 pointer-events-none'}`}
-        aria-disabled={!confirmed}
-      >
-        {children}
-      </div>
-      {!confirmed && <p className="mt-2 text-xs text-[#a8455e]">＊ 先勾選「我已經存好了」才能繼續</p>}
-      {note && <p className="mt-4 text-xs text-[#6f6156]">{note}</p>}
-    </div>
-  );
-}
 
 // ---------- 錯誤／空狀態 ----------
 export function EmptyNote({ children }: { children: ReactNode }) {
@@ -557,87 +448,16 @@ export function ImeTextarea({
   );
 }
 
-// ---------- 權杖驗證閘門（貼上權杖以繼續） ----------
-export function TokenGate({
-  title,
-  hint,
-  token,
-  setToken,
-  onSubmit,
-  busy,
-  error,
-}: {
-  title: string;
-  hint: string;
-  token: string;
-  setToken: (v: string) => void;
-  onSubmit: () => void;
-  busy: boolean;
-  error: string | null;
-}) {
-  useEffect(() => {
-    let cancelled = false;
-    (async () => {
-      try {
-        const t = (await navigator.clipboard.readText()).trim();
-        if (cancelled || token) return;
-        if (/^(chr_|own_)/i.test(t)) setToken(t);
-      } catch {
-        /* 沒權限就讓人自己貼 */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const pasteFromClipboard = async () => {
-    try {
-      const t = (await navigator.clipboard.readText()).trim();
-      if (t) setToken(t);
-    } catch {
-      /* ignore */
-    }
-  };
-
+// ---------- 登入提示（取代原本的權杖驗證閘門）----------
+export function LoginPrompt({ title, hint }: { title: string; hint: string }) {
+  const next = encodeURIComponent(window.location.pathname + window.location.search);
   return (
     <div className="mx-auto max-w-md kg-card p-6 sm:p-8 kg-rise">
       <h1 className="font-huninn text-2xl mb-2">{title}</h1>
       <p className="text-sm text-[#6f6156] mb-5 leading-relaxed">{hint}</p>
-      <label htmlFor="fld-kg-1" className="kg-label">
-        編輯碼 <span className="req">*</span>
-      </label>
-      <input
-        id="fld-kg-1"
-        className="kg-input font-mono2"
-        value={token}
-        onChange={(e) => setToken(e.target.value)}
-        placeholder="貼上主辦給你的那串碼"
-        autoComplete="off"
-        autoCapitalize="none"
-        autoCorrect="off"
-        spellCheck={false}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' && token.trim()) onSubmit();
-        }}
-      />
-      <button type="button" className="kg-pill kg-pill-ghost w-full justify-center mt-3 min-h-11" onClick={() => { void pasteFromClipboard(); }}>
-        從剪貼簿貼上
-      </button>
-      {error && (
-        <div className="mt-3">
-          <ErrorBox>{error}</ErrorBox>
-        </div>
-      )}
-      <button
-        type="button"
-        className="kg-pill kg-pill-red w-full justify-center mt-5"
-        disabled={busy || !token.trim()}
-        onClick={onSubmit}
-      >
-        {busy ? '驗證中…' : '進入'}
-      </button>
+      <a href={`/api/auth/discord/login?next=${next}`} className="kg-pill kg-pill-red w-full justify-center">
+        用 Discord 登入
+      </a>
     </div>
   );
 }
