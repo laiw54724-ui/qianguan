@@ -21,7 +21,7 @@ export function crockford(bytes: Uint8Array): string {
   return out;
 }
 
-export function genToken(prefix: 'chr' | 'own' | 'inv'): string {
+export function genToken(prefix: 'ses'): string {
   return `${prefix}_${crockford(crypto.getRandomValues(new Uint8Array(16))).slice(0, 26).toLowerCase()}`;
 }
 

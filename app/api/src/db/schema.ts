@@ -136,9 +136,22 @@ export const events = sqliteTable(
   (t) => [index('idx_event_feed').on(t.projectId, t.createdAt)],
 );
 
+export const sessions = sqliteTable(
+  'sessions',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    tokenHash: text('token_hash').notNull().unique(),
+    discordId: text('discord_id').notNull(),
+    createdAt: integer('created_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+  },
+  (t) => [index('idx_sessions_discord').on(t.discordId), index('idx_sessions_exp').on(t.expiresAt)],
+);
+
 export type ProjectRow = typeof projects.$inferSelect;
 export type CharacterRow = typeof characters.$inferSelect;
 export type RelationRow = typeof relations.$inferSelect;
 export type EventRow = typeof events.$inferSelect;
 export type RelationNoteRow = typeof relationNotes.$inferSelect;
 export type PrivateRelationRow = typeof privateRelations.$inferSelect;
+export type SessionRow = typeof sessions.$inferSelect;
