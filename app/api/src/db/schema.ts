@@ -72,7 +72,6 @@ export const relations = sqliteTable(
     aNote: text('a_note').notNull().default(''),
     bLabel: text('b_label').notNull().default(''),
     bNote: text('b_note').notNull().default(''),
-    extras: text('extras', { mode: 'json' }).$defaultFn(() => []), // JSON: RelationExtra[]
     status: text('status').notNull().default('pending'), // pending|accepted|declined
     initiator: text('initiator').notNull(), // 'a'|'b'
     createdAt: integer('created_at').notNull(),
@@ -84,6 +83,20 @@ export const relations = sqliteTable(
     index('idx_rel_b').on(t.bId),
     check('chk_rel_order', sql`${t.aId} < ${t.bId}`),
   ],
+);
+
+export const relationNotes = sqliteTable(
+  'relation_notes',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    relationId: integer('relation_id')
+      .notNull()
+      .references(() => relations.id),
+    body: text('body').notNull(),
+    authorSide: text('author_side').notNull(), // 'a'|'b'
+    createdAt: integer('created_at').notNull(),
+  },
+  (t) => [index('idx_rnotes').on(t.relationId, t.createdAt)],
 );
 
 export const events = sqliteTable(
@@ -106,3 +119,4 @@ export type ProjectRow = typeof projects.$inferSelect;
 export type CharacterRow = typeof characters.$inferSelect;
 export type RelationRow = typeof relations.$inferSelect;
 export type EventRow = typeof events.$inferSelect;
+export type RelationNoteRow = typeof relationNotes.$inferSelect;
