@@ -1,7 +1,7 @@
 // 唯一的 fetch 封裝 — 對外暴露與原型 lib/store.ts 完全相同的函式名與參數，元件層不用改。
 // 規格 §6.3：所有 mutation 統一在這裡帶 X-KG: 1 自訂標頭；任何元件不得自己呼叫 fetch。
 // 權杖走 httpOnly cookie（credentials: 'same-origin'）；貼碼救援時把 token 放 body，後端驗過會順手種 cookie。
-import type { Character, FieldDef, JoinMode, KgEvent, Project, Relation, RelationNote, TagGroup, Visibility, WorldBlock } from './types';
+import type { Character, FieldDef, JoinMode, KgEvent, PrivateRelation, Project, Relation, RelationNote, TagGroup, Visibility, WorldBlock } from './types';
 import type { SocialLink } from './links';
 
 const BASE = '/api';
@@ -219,13 +219,35 @@ export async function rotateCharToken(
   return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/rotate-token`, {});
 }
 
-export async function createDraftCharacter(
+// ---------- 單人可用性（private_relations，1.5-2，取代 draft-char）----------
+export async function listPrivateRelations(slug: string, charId: string): Promise<PrivateRelation[]> {
+  try {
+    return await req<PrivateRelation[]>('GET', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/private-relations`);
+  } catch {
+    return [];
+  }
+}
+
+export async function createPrivateRelation(
   slug: string,
   charId: string,
-  _token: string,
-  name: string,
-): Promise<{ ok: true; character: Character; charToken: string } | { ok: false; error: string }> {
-  return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/draft-char`, { name });
+  ghostName: string,
+  label: string,
+  note: string,
+): Promise<{ ok: true; row: PrivateRelation } | { ok: false; error: string }> {
+  return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/private-relations`, { ghostName, label, note });
+}
+
+export async function deletePrivateRelation(slug: string, charId: string, id: number): Promise<Result> {
+  return tryReq('DELETE', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/private-relations/${id}`);
+}
+
+export async function promotePrivateRelation(
+  slug: string,
+  charId: string,
+  id: number,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/private-relations/${id}/promote`, {});
 }
 
 // ---------- 牽線 ----------

@@ -58,6 +58,18 @@ export interface RelationNote {
   created_at: number;
 }
 
+// 單人可用性的私人紀錄（1.5-2，取代原本的 draft-char）——只有 owner_char_id 對應的角色本人看得到
+export interface PrivateRelation {
+  id: number;
+  ghost_name: string;
+  label: string;
+  note: string;
+  linked_char_id: string | null;
+  suggested_char_id: string | null;
+  created_at: number;
+  updated_at: number;
+}
+
 // 角色自訂欄位類型（名帖式）— 區塊與欄位共用
 export type FieldType =
   | 'text' // 短文字

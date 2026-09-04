@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   addRelationNote,
-  createDraftCharacter,
+  createPrivateRelation,
+  deletePrivateRelation,
   deleteRelationNote,
   getCharacter,
   initiateRelation,
   listCharacters,
+  listPrivateRelations,
+  promotePrivateRelation,
   relationsForChar,
   respondRelation,
   sideOf,
@@ -26,7 +29,7 @@ import { PageLoading,
   toast,
 } from '../components/kg';
 import { ProjectShell } from '../components/project-shell';
-import type { Character, Project, Relation } from '../lib/types';
+import type { Character, PrivateRelation, Project, Relation } from '../lib/types';
 
 export default function RelationsPage({ slug, charId }: { slug: string; charId: string }) {
   const [data, setData] = useState<{ project: Project; character: Character } | null | undefined>(undefined);
@@ -48,11 +51,10 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // 草稿角色（對方還沒加入）
-  const [draftName, setDraftName] = useState('');
-  const [draftBusy, setDraftBusy] = useState(false);
-  const [draftResult, setDraftResult] = useState<{ character: Character; charToken: string } | null>(null);
-  const [copied, setCopied] = useState(false);
+  // 私人紀錄（對方還沒加入，或還沒對上真人，1.5-2）
+  const [privRels, setPrivRels] = useState<PrivateRelation[]>([]);
+  const [ghostName, setGhostName] = useState('');
+  const [ghostBusy, setGhostBusy] = useState(false);
 
   // 回應表單（逐條）
   const [respLabel, setRespLabel] = useState<Record<number, string>>({});
@@ -67,17 +69,19 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = async () => {
-    // 1-2：三條查詢彼此不依賴，並行抓
-    const [got, relList, chars] = await Promise.all([
+    // 1-2：四條查詢彼此不依賴，並行抓
+    const [got, relList, chars, priv] = await Promise.all([
       getCharacter(slug, charId),
       relationsForChar(slug, charId),
       listCharacters(slug),
+      listPrivateRelations(slug, charId),
     ]);
     setData(got);
     if (!got) return;
     setRels(relList);
     setAllChars(chars);
     setCharMap(new Map(chars.map((c) => [c.id, c])));
+    setPrivRels(priv);
   };
 
   useEffect(() => {
@@ -202,31 +206,31 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
     }
   };
 
-  const doCreateDraft = async () => {
+  const doAddGhost = async () => {
     setFormError(null);
-    if (!draftName.trim()) return setFormError('請填對方角色的名字');
-    setDraftBusy(true);
+    if (!ghostName.trim()) return setFormError('請填對方的名字');
+    setGhostBusy(true);
     try {
-      const res = await createDraftCharacter(slug, charId, token, draftName);
+      const res = await createPrivateRelation(slug, charId, ghostName, '', '');
       if (!res.ok) return setFormError(res.error);
-      setDraftResult(res);
-      setTargetId(res.character.id);
-      setDraftName('');
+      setGhostName('');
       await refresh();
     } finally {
-      setDraftBusy(false);
+      setGhostBusy(false);
     }
   };
 
-  const copyDraftToken = async () => {
-    if (!draftResult) return;
-    try {
-      await navigator.clipboard.writeText(draftResult.charToken);
-    } catch {
-      /* 剪貼簿不可用時讓使用者手動選取 */
-    }
-    setCopied(true);
-    setTimeout(() => setCopied(false), 1600);
+  const doDeleteGhost = async (id: number) => {
+    const res = await deletePrivateRelation(slug, charId, id);
+    if (!res.ok) return toast(res.error, 'err');
+    await refresh();
+  };
+
+  const doPromoteGhost = async (id: number) => {
+    const res = await promotePrivateRelation(slug, charId, id);
+    if (!res.ok) return toast(res.error, 'err');
+    setNotice('已送出正式邀請，等對方回應。');
+    await refresh();
   };
 
   const doRespond = async (r: Relation, action: 'accept' | 'decline') => {
@@ -564,36 +568,48 @@ id="fld-Relations-5"                 className="kg-input"
               )}
             </div>
 
-            {/* 對方還沒加入：先建草稿 */}
+            {/* 對方還沒加入企劃：記一筆只有自己看得到的私人紀錄，不建角色 */}
             <div className="kg-card-flat p-4" style={{ background: '#fbf8f3' }}>
               <div className="kg-seclabel mb-2">（對方還沒加入企劃？）</div>
+              <p className="text-xs text-[#6f6156] leading-relaxed mb-3">
+                先記下對方的名字，只有你看得到。之後對方真的加入且建了同名角色，這裡會出現「送出正式邀請」的建議。
+              </p>
               <div className="flex gap-2 flex-wrap">
                 <input
                   className="kg-input !w-auto flex-1 min-w-[160px]"
-                  value={draftName}
-                  onChange={(e) => setDraftName(e.target.value)}
-                  placeholder="先建一張只有名字的草稿角色"
-                  maxLength={30}
+                  value={ghostName}
+                  onChange={(e) => setGhostName(e.target.value)}
+                  placeholder="對方的名字"
+                  maxLength={40}
                 />
-                <button type="button" className="kg-pill kg-pill-ink kg-pill-sm" disabled={draftBusy || !draftName.trim()} onClick={doCreateDraft}>
-                  {draftBusy ? '建立中…' : '建立草稿角色'}
+                <button type="button" className="kg-pill kg-pill-ink kg-pill-sm" disabled={ghostBusy || !ghostName.trim()} onClick={doAddGhost}>
+                  {ghostBusy ? '記錄中…' : '記下對方名字'}
                 </button>
               </div>
-              {draftResult && (
-                <div className="mt-3 rounded-xl border-2 border-[#e8dfd4] bg-white p-4">
-                  <p className="text-sm font-bold mb-2">草稿「{draftResult.character.name}」已建立並選為牽線對象。</p>
-                  <p className="text-xs text-[#6f6156] leading-relaxed mb-3">
-                    把這組角色編輯碼私下交給對方——TA 在角色頁貼上即可認領、補完角色卡並回應牽線。此碼只顯示這一次：
-                  </p>
-                  <div className="kg-token-box text-sm">{draftResult.charToken}</div>
-                  <div className="flex gap-2 mt-3">
-                    <button type="button" className="kg-pill kg-pill-ink kg-pill-sm" onClick={copyDraftToken}>
-                      {copied ? '✓ 已複製' : '複製權杖'}
-                    </button>
-                    <a className="kg-pill kg-pill-ghost kg-pill-sm" href={href(`/p/${slug}/c/${draftResult.character.id}`)}>
-                      查看草稿角色頁
-                    </a>
-                  </div>
+              {privRels.length > 0 && (
+                <div className="mt-3 space-y-2">
+                  {privRels.map((p) => (
+                    <div key={p.id} className="kg-card-flat p-3 flex items-center justify-between gap-3 bg-white">
+                      <div>
+                        <b className="text-sm">{p.ghost_name}</b>
+                        {p.suggested_char_id && (
+                          <span className="text-xs text-[#6f6156] ml-2">
+                            站上有同名角色，要送出正式邀請嗎？
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex gap-2 shrink-0">
+                        {p.suggested_char_id && (
+                          <button type="button" className="kg-pill kg-pill-red kg-pill-sm" onClick={() => doPromoteGhost(p.id)}>
+                            送出邀請
+                          </button>
+                        )}
+                        <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm" onClick={() => doDeleteGhost(p.id)}>
+                          刪除
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
