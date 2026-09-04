@@ -92,7 +92,11 @@ export const characterPatchSchema = z.object({
 
 export const shareNoteSchema = z.object({ note: str(140) });
 
-export const draftCharSchema = z.object({ name: str(40) });
+export const privateRelationCreateSchema = z.object({ ghostName: str(40), label: str(40).optional(), note: str(2000).optional() });
+
+export const privateRelationUpdateSchema = z.object({ label: str(40).optional(), note: str(2000).optional() });
+
+export const privateRelationPromoteSchema = z.object({ turnstile: optStr(900_000) });
 
 export const tokenSchema = z.object({ token: optStr(128) });
 

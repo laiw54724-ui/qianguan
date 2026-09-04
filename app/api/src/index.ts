@@ -17,6 +17,7 @@ import * as schema from './schemas';
 import * as projectSvc from './services/project';
 import * as charSvc from './services/character';
 import * as relSvc from './services/relation';
+import * as privRelSvc from './services/privateRelation';
 import * as eventSvc from './services/event';
 import { fetchPageTitle } from './services/preview';
 
@@ -264,17 +265,59 @@ app.post('/api/p/:slug/c/:charId/rotate-token', async (c) => {
   return c.json({ ok: true, character: r.character, charToken: r.charToken });
 });
 
-app.post('/api/p/:slug/c/:charId/draft-char', async (c) => {
+// ================= 1.5-2：單人可用性（private_relations，取代 draft-char）=================
+
+app.get('/api/p/:slug/c/:charId/private-relations', async (c) => {
   const d = db(c);
-  if (!(await requireChar(d, c.req.param('slug'), c.req.param('charId'), cookieOf(c)))) {
-    return c.json({ error: AUTH_FAIL }, 401);
-  }
-  const input = await parseBody(c, schema.draftCharSchema);
+  const got = await requireChar(d, c.req.param('slug'), c.req.param('charId'), cookieOf(c));
+  if (!got) return c.json({ error: AUTH_FAIL }, 401);
+  return c.json(await privRelSvc.listFor(d, got.project.id, got.character.id));
+});
+
+app.post('/api/p/:slug/c/:charId/private-relations', async (c) => {
+  const d = db(c);
+  const got = await requireChar(d, c.req.param('slug'), c.req.param('charId'), cookieOf(c));
+  if (!got) return c.json({ error: AUTH_FAIL }, 401);
+  const input = await parseBody(c, schema.privateRelationCreateSchema);
   if (!input) return c.json({ error: '參數格式不正確' }, 400);
-  const r = await charSvc.createDraftChar(d, c.req.param('slug'), cookieOf(c), input.name);
+  if (!input.ghostName.trim()) return c.json({ error: '名字不能留空' }, 400);
+  const r = await privRelSvc.create(d, got.project.id, got.character.id, input.ghostName, input.label ?? '', input.note ?? '');
+  return c.json(r);
+});
+
+app.patch('/api/p/:slug/c/:charId/private-relations/:id', async (c) => {
+  const d = db(c);
+  const got = await requireChar(d, c.req.param('slug'), c.req.param('charId'), cookieOf(c));
+  if (!got) return c.json({ error: AUTH_FAIL }, 401);
+  const input = await parseBody(c, schema.privateRelationUpdateSchema);
+  if (!input) return c.json({ error: '參數格式不正確' }, 400);
+  const r = await privRelSvc.update(d, got.character.id, Number(c.req.param('id')), input.label ?? '', input.note ?? '');
+  if ('error' in r) return c.json({ error: r.error }, 404);
+  return c.json(r);
+});
+
+app.delete('/api/p/:slug/c/:charId/private-relations/:id', async (c) => {
+  const d = db(c);
+  const got = await requireChar(d, c.req.param('slug'), c.req.param('charId'), cookieOf(c));
+  if (!got) return c.json({ error: AUTH_FAIL }, 401);
+  const ok = await privRelSvc.remove(d, got.character.id, Number(c.req.param('id')));
+  if (!ok) return c.json({ error: AUTH_FAIL }, 404);
+  return c.json({ ok: true });
+});
+
+// 轉正：對著一筆有 suggested_char_id 的私人紀錄按下去，重用既有的 relSvc.initiate() 送出正式邀請，
+// 成功才標記這筆私人紀錄已連結——不是新邏輯，是既有牽線流程的一個入口。
+app.post('/api/p/:slug/c/:charId/private-relations/:id/promote', async (c) => {
+  const d = db(c);
+  const got = await requireChar(d, c.req.param('slug'), c.req.param('charId'), cookieOf(c));
+  if (!got) return c.json({ error: AUTH_FAIL }, 401);
+  const rows = await privRelSvc.listFor(d, got.project.id, got.character.id);
+  const target = rows.find((r) => r.id === Number(c.req.param('id')));
+  if (!target || !target.suggested_char_id) return c.json({ error: '找不到可以轉正的對象' }, 400);
+  const r = await relSvc.initiate(d, got.project.id, got.character.id, target.suggested_char_id, target.label || target.ghost_name, target.note);
   if ('error' in r) return c.json({ error: r.error }, 400);
-  c.header('Set-Cookie', r.cookie, { append: true });
-  return c.json({ ok: true, character: r.character, charToken: r.charToken });
+  await privRelSvc.markLinked(d, got.character.id, target.id, target.suggested_char_id);
+  return c.json({ ok: true, relation: r.relation });
 });
 
 // ================= 牽線 =================

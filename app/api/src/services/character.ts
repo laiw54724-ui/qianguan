@@ -240,36 +240,3 @@ export async function removeChar(db: DB, slug: string, charId: string): Promise<
   return { ok: true };
 }
 
-// ---- 為已有角色的人再開一隻空白 OC（Relations 頁「新增角色」）----
-// 需已持有本企劃任一角色權杖（路由層驗）；新權杖併入既有 cookie，不覆寫。
-
-export async function createDraftChar(
-  db: DB,
-  slug: string,
-  cookieHeader: string | undefined,
-  name: string,
-): Promise<{ ok: true; character: ReturnType<typeof toChar>; charToken: string; cookie: string } | { error: string }> {
-  const p = await getProjectRaw(db, slug);
-  if (!p) return { error: AUTH_FAIL };
-  const trimmed = name.trim();
-  if (!trimmed) return { error: '名字不能留空' };
-  const charToken = genToken('chr');
-  const id = await genCharIdUnique(db);
-  const now = Date.now();
-  await db.insert(characters).values({
-    id,
-    projectId: p.id,
-    name: trimmed,
-    status: 'draft',
-    editTokenHash: await sha256hex(charToken),
-    createdAt: now,
-    updatedAt: now,
-  });
-  const c = (await getCharRaw(db, p.id, id))!;
-  return {
-    ok: true,
-    character: toChar(c),
-    charToken,
-    cookie: charCookieLine(slug, p.id, cookieHeader, charToken),
-  };
-}
