@@ -6,7 +6,7 @@
 import { Hono, type Context } from 'hono';
 import { drizzle } from 'drizzle-orm/d1';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
-import { and, eq, inArray, ne } from 'drizzle-orm';
+import { and, eq, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { characters, type ProjectRow } from './db/schema';
 import { AUTH_FAIL } from './auth/token';
@@ -15,7 +15,6 @@ import { validateNextPath } from './auth/nextPath';
 import { createState, consumeState } from './auth/oauthState';
 import { exchangeCode, fetchDiscordId } from './auth/discordOAuth';
 import { csrfGuard, securityHeaders, rateLimitGuard } from './middleware/security';
-import { verifyTurnstile } from './turnstile';
 import * as schema from './schemas';
 import * as projectSvc from './services/project';
 import * as charSvc from './services/character';
@@ -96,9 +95,6 @@ async function requireCharManage(d: DrizzleD1Database, slug: string, charId: str
   return null;
 }
 
-const ts = (c: Ctx, token?: string) =>
-  verifyTurnstile(c.env.TURNSTILE_SECRET, token, c.req.header('CF-Connecting-IP'));
-
 // ================= 公開端點 =================
 
 app.get('/api/projects', async (c) => c.json(await projectSvc.listPublicProjects(db(c))));
@@ -158,6 +154,12 @@ app.get('/api/me', async (c) => {
   return c.json({ discordId: session?.discordId ?? null });
 });
 
+app.get('/api/me/dashboard', async (c) => {
+  const session = await sessionSvc.resolveSession(db(c), cookieOf(c));
+  if (!session) return c.json({ error: AUTH_FAIL }, 401);
+  return c.json(await projectSvc.dashboardFor(db(c), session.discordId));
+});
+
 app.post('/api/auth/logout', async (c) => {
   await sessionSvc.revokeCurrentSession(db(c), cookieOf(c));
   c.header('Set-Cookie', sessionCookieClear(), { append: true });
@@ -173,13 +175,15 @@ app.post('/api/auth/logout-all', async (c) => {
 });
 
 app.post('/api/projects', async (c) => {
+  const session = await sessionSvc.resolveSession(db(c), cookieOf(c));
+  if (!session) return c.json({ error: AUTH_FAIL }, 401);
+  const { success } = await c.env.DISCORD_RATE_LIMITER.limit({ key: session.discordId });
+  if (!success) return c.json({ error: '操作太頻繁，請稍後再試' }, 429);
   const input = await parseBody(c, schema.createProjectSchema);
   if (!input) return c.json({ error: '參數格式不正確' }, 400);
   if (!input.title.trim()) return c.json({ error: '企劃名不能留空' }, 400);
-  if (!(await ts(c, input.turnstile))) return c.json({ error: '人機驗證未通過，請再試一次' }, 403);
-  const r = await projectSvc.createProject(db(c), input);
-  c.header('Set-Cookie', r.cookie, { append: true });
-  return c.json({ project: r.project, ownerToken: r.ownerToken, transferCode: r.transferCode });
+  const r = await projectSvc.createProject(db(c), input, session.discordId);
+  return c.json(r);
 });
 
 app.get('/api/p/:slug', async (c) => {
@@ -232,20 +236,6 @@ app.get('/api/p/:slug/feed', async (c) => {
 
 // ================= 開設者 =================
 
-// 貼碼救援：驗過就種 cookie（§4.2）
-app.post('/api/p/:slug/owner-session', async (c) => {
-  const input = await parseBody(c, schema.tokenSchema);
-  if (!input) return c.json({ error: '參數格式不正確' }, 400);
-  const r = await projectSvc.verifyOwner(db(c), c.req.param('slug'), cookieOf(c), input.token ?? '');
-  if (!r) {
-    // §A09：這條沒掛 Turnstile（§6.6），記失敗次數供異常偵測；權杖本身不入 log
-    console.warn(`owner-session auth fail: slug=${c.req.param('slug')} ip=${c.req.header('CF-Connecting-IP') ?? 'unknown'}`);
-    return c.json({ error: AUTH_FAIL }, 401);
-  }
-  if (r.cookie) c.header('Set-Cookie', r.cookie, { append: true });
-  return c.json({ project: r.project });
-});
-
 app.patch('/api/p/:slug', async (c) => {
   const d = db(c);
   if (!(await requireOwner(d, c.req.param('slug'), cookieOf(c)))) return c.json({ error: AUTH_FAIL }, 401);
@@ -273,26 +263,15 @@ app.delete('/api/p/:slug/c/:charId', async (c) => {
 // ================= 角色 =================
 
 app.post('/api/p/:slug/join', async (c) => {
+  const session = await sessionSvc.resolveSession(db(c), cookieOf(c));
+  if (!session) return c.json({ error: AUTH_FAIL }, 401);
+  const { success } = await c.env.DISCORD_RATE_LIMITER.limit({ key: session.discordId });
+  if (!success) return c.json({ error: '操作太頻繁，請稍後再試' }, 429);
   const input = await parseBody(c, schema.joinSchema);
   if (!input) return c.json({ error: '參數格式不正確' }, 400);
-  if (!(await ts(c, input.turnstile))) return c.json({ error: '人機驗證未通過，請再試一次' }, 403);
-  const r = await charSvc.joinProject(db(c), c.req.param('slug'), cookieOf(c), input);
+  const r = await charSvc.joinProject(db(c), c.req.param('slug'), session.discordId, input);
   if ('error' in r) return c.json({ error: r.error }, 400);
-  c.header('Set-Cookie', r.cookie, { append: true });
-  return c.json({ ok: true, character: r.character, charToken: r.charToken });
-});
-
-// 貼編輯碼救援：驗過就種 cookie
-app.post('/api/p/:slug/c/:charId/session', async (c) => {
-  const input = await parseBody(c, schema.tokenSchema);
-  if (!input) return c.json({ error: '參數格式不正確' }, 400);
-  const r = await charSvc.verifyCharToken(db(c), c.req.param('slug'), c.req.param('charId'), cookieOf(c), input.token ?? '');
-  if (!r) {
-    console.warn(`char-session auth fail: slug=${c.req.param('slug')} charId=${c.req.param('charId')} ip=${c.req.header('CF-Connecting-IP') ?? 'unknown'}`);
-    return c.json({ error: AUTH_FAIL }, 401);
-  }
-  if (r.cookie) c.header('Set-Cookie', r.cookie, { append: true });
-  return c.json({ character: r.character });
+  return c.json(r);
 });
 
 app.patch('/api/p/:slug/c/:charId', async (c) => {
@@ -398,9 +377,10 @@ app.post('/api/p/:slug/c/:charId/relations', async (c) => {
   const d = db(c);
   const got = await requireChar(d, c.req.param('slug'), c.req.param('charId'), cookieOf(c));
   if (!got) return c.json({ error: AUTH_FAIL }, 401);
+  const { success } = await c.env.DISCORD_RATE_LIMITER.limit({ key: `${got.character.discordId}` });
+  if (!success) return c.json({ error: '操作太頻繁，請稍後再試' }, 429);
   const input = await parseBody(c, schema.initiateSchema);
   if (!input) return c.json({ error: '參數格式不正確' }, 400);
-  if (!(await ts(c, input.turnstile))) return c.json({ error: '人機驗證未通過，請再試一次' }, 403);
   const r = await relSvc.initiate(d, got.project.id, got.character.id, input.targetId, input.label, input.note);
   if ('error' in r) return c.json({ error: r.error }, 400);
   return c.json({ ok: true });

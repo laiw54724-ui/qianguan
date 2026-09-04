@@ -44,8 +44,6 @@ export const createProjectSchema = z.object({
   visibility: z.enum(['public', 'unlisted']).optional(),
   join_mode: z.enum(['open', 'code']),
   join_code: optStr(100),
-  owner_discord_id: optStr(100),
-  turnstile: optStr(900_000),
   links: z.array(socialLink).max(8).optional(),
 });
 
@@ -77,7 +75,6 @@ export const joinSchema = z.object({
   links: z.array(socialLink).max(8).optional(),
   tags: z.array(str(40)).max(40).optional(),
   join_code: optStr(100),
-  turnstile: optStr(900_000),
 });
 
 export const characterPatchSchema = z.object({
@@ -96,15 +93,10 @@ export const privateRelationCreateSchema = z.object({ ghostName: str(40), label:
 
 export const privateRelationUpdateSchema = z.object({ label: str(40).optional(), note: str(2000).optional() });
 
-export const privateRelationPromoteSchema = z.object({ turnstile: optStr(900_000) });
-
-export const tokenSchema = z.object({ token: optStr(128) });
-
 export const initiateSchema = z.object({
   targetId: str(64),
   label: str(100),
   note: str(2000),
-  turnstile: optStr(900_000),
 });
 
 export const respondSchema = z.object({

@@ -7,10 +7,8 @@ interface RateLimit {
   limit(options: { key: string }): Promise<{ success: boolean }>;
 }
 
-// §6.4：Turnstile 只掛在建立企劃／加入／發起牽線；owner-session／c/:id/session 這兩個貼碼救援端點
-// 刻意不掛 Turnstile（規格 §6.6：不對權杖驗證加驗證碼），靠這裡的 IP 節流頂著防暴力猜權杖／濫用。
-// 60 秒 30 次是全站 mutation 共用的寬鬆上限（見 wrangler.jsonc 的 ratelimits），先擋住腳本濫用，
-// 不影響正常使用者手速。
+// §6.4：discord_id 限流另外掛在建企劃／加入／發起牽線（DISCORD_RATE_LIMITER，見 index.ts）；
+// 這裡是全站 IP 節流，所有 mutation 共用，先擋住腳本濫用，不影響正常使用者手速。
 export async function rateLimitGuard(c: Context<{ Bindings: { RATE_LIMITER: RateLimit } }>, next: Next) {
   const method = c.req.method;
   if (method === 'POST' || method === 'PATCH' || method === 'PUT' || method === 'DELETE') {
@@ -63,7 +61,7 @@ export async function securityHeaders(c: Context, next: Next) {
   // frame-src 含 youtube.com／drive.google.com：對應前端 videoEmbedUrl() 的嵌入白名單，兩邊要一致
   headers.set(
     'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' data: https:; media-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com https://www.youtube.com https://drive.google.com; connect-src 'self' https://challenges.cloudflare.com",
+    "default-src 'self'; img-src 'self' data: https:; media-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; frame-src https://www.youtube.com https://drive.google.com; connect-src 'self'",
   );
   c.res = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }
