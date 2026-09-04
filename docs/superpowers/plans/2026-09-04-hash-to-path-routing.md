@@ -55,7 +55,13 @@ app.all('*', async (c) => {
   if (c.req.path.startsWith('/api/')) return c.json({ error: AUTH_FAIL }, 404);
   const res = await c.env.ASSETS.fetch(c.req.raw);
   if (res.status !== 404) return res;
-  return c.env.ASSETS.fetch(new Request(new URL('/', c.req.url).toString(), c.req.raw));
+  // 明確拿 /index.html，不是拿 c.req.raw 改個網址重送——
+  // 這條 catch-all 是 app.all('*')，任何方法都會進來，把原始請求（可能是 POST 帶 body）
+  // 原封不動轉去 '/' 會把 method/body 一起帶過去，語意不對且某些 runtime 會直接拋錯。
+  // 也不能信任 ASSETS 對 '/' 的回應狀態碼，這裡是給爬蟲／使用者看的頁面殼，一定要回 200，
+  // 否則爬蟲會判定頁面不存在，OG meta 就白做了。
+  const shell = await c.env.ASSETS.fetch(new URL('/index.html', c.req.url));
+  return new Response(shell.body, { status: 200, headers: shell.headers });
 });
 ```
 
@@ -83,14 +89,18 @@ npm run dev
 # 真實存在的靜態檔案：應該直接回 200 且是圖片內容，不是 index.html
 curl -sI http://localhost:8787/favicon.svg | head -1
 
-# 一個目前沒有對應實體檔案的 SPA 路由：應該回 200 且內容是 index.html（含 <div id="root">）
+# 一個目前沒有對應實體檔案的 SPA 路由：狀態碼一定要是 200（不是 404），內容是 index.html（含 <div id="root">）
+curl -s -o /dev/null -w '%{http_code}\n' http://localhost:8787/p/some-slug/manage
 curl -s http://localhost:8787/p/some-slug/manage | grep -o '<div id="root">'
+
+# POST 到一個不存在的路徑也要走同一條 fallback，不能因為帶了 method/body 就出錯或回錯東西
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -d '{}' http://localhost:8787/p/some-slug/manage
 
 # API 路由不受影響，還是照舊 404 JSON
 curl -s http://localhost:8787/api/not-a-real-route | head -c 100
 ```
 
-Expected：第一個回傳 SVG 內容；第二個印出 `<div id="root">`（代表 fallback 有生效，回的是 index.html）；第三個是 JSON 格式的 `{"error":...}`。
+Expected（依指令順序）：SVG 內容 → `200` → `<div id="root">`（代表 fallback 有生效，回的是 index.html）→ `200`（POST 帶 body 也要能正常過 fallback，不能出錯或回錯東西）→ JSON 格式的 `{"error":...}`。
 
 - [ ] **Step 4: Commit**
 
@@ -170,7 +180,32 @@ git commit -m "feat: fall back to index.html for unmatched non-API paths (SPA pa
 
 （同樣拿掉 `redirect` 變數與 `.on('head', ...)` 那一行；`title`/`meta` 兩個 `.on()` 保留，內容不變。）
 
-- [ ] **Step 2: typecheck + 既有測試**
+- [ ] **Step 2: 在 `HeadRewriter` 建構子註記 `redirect` 現在沒有呼叫端在用**
+
+Step 1 做完之後，`app/api/src/index.ts` 裡已經沒有任何地方會傳非 `null` 的 `redirect` 進 `HeadRewriter`，但這個參數本身留著（拿掉它要動到類別定義跟兩個呼叫點，多一次改動風險，不在這次範圍）。加一行註解避免下次有人以為它還有用。把第 350-354 行：
+
+```ts
+class HeadRewriter {
+  constructor(
+    private meta: { title: string; description: string; image: string | null },
+    private redirect: string | null,
+  ) {}
+```
+
+改成：
+
+```ts
+class HeadRewriter {
+  constructor(
+    private meta: { title: string; description: string; image: string | null },
+    // path routing 上線後（見工單 P2 第一步）沒有任何呼叫端會傳非 null 進來了——
+    // JS 會在同一個網址原地接手，不用再靠這裡轉址；留著這個參數但沒人用，之後若要整個拿掉
+    // 要一併改 servePage() 的三個呼叫點。
+    private redirect: string | null,
+  ) {}
+```
+
+- [ ] **Step 3: typecheck + 既有測試**
 
 ```bash
 cd app/api
@@ -178,7 +213,7 @@ npm run typecheck
 npx vitest run
 ```
 
-- [ ] **Step 3: 手動驗證 OG meta 還在，但不再轉址**
+- [ ] **Step 4: 手動驗證 OG meta 還在，但不再轉址**
 
 ```bash
 cd app/api
@@ -191,7 +226,7 @@ curl -s http://localhost:8787/p/some-slug | grep -E 'og:title|http-equiv=.refres
 
 Expected：看得到 `og:title` 這行（meta 還在注入），**看不到** `http-equiv="refresh"` 這行（轉址已經拿掉）。
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add app/api/src/index.ts
@@ -334,16 +369,27 @@ export function href(path: string) {
 }
 
 /** 站內 <a href="/..."> 點擊時攔截成 client-side 導覽（不然瀏覽器會整頁重載）；
- * 排除 /api/... 開頭的連結——那些是刻意要真的送到伺服器的（例如未來的第三方登入入口），
- * 不該被攔下來走前端路由。取代原本掛在 dirty.ts 的 installClickGuard——path routing 下
- * 這支函式不只是「攔住 dirty 頁面」，還得真的完成導覽（pushState），職責變了所以搬過來。 */
+ * 取代原本掛在 dirty.ts 的 installClickGuard——path routing 下這支函式不只是「攔住 dirty 頁面」，
+ * 還得真的完成導覽（pushState），職責變了所以搬過來。
+ * 用 URL().origin 判斷是不是真的站內連結，不能只看開頭是不是 "/"——
+ * "//example.com/foo" 這種協議相對網址也是以 "/" 開頭，字串前綴判斷會誤判成站內路徑，
+ * 角色卡上的外部資料連結如果剛好是這個格式就會被攔下來導去一個不存在的站內路徑。 */
 export function installLinkNavigation(): () => void {
   const onClick = (e: MouseEvent) => {
     if (e.defaultPrevented || e.button !== 0 || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
-    const a = (e.target as HTMLElement).closest?.('a[href^="/"]:not([href^="/api/"])') as HTMLAnchorElement | null;
-    if (!a || a.target === '_blank') return;
-    const path = a.getAttribute('href') ?? '';
-    if (!path) return;
+    const a = (e.target as HTMLElement).closest?.('a[href]') as HTMLAnchorElement | null;
+    if (!a || a.target === '_blank' || a.hasAttribute('download') || a.rel.split(/\s+/).includes('external')) return;
+    const raw = a.getAttribute('href') ?? '';
+    // /api/... 是刻意要真的送到伺服器的（例如未來的第三方登入入口），不該被攔下來走前端路由
+    if (!raw.startsWith('/') || raw.startsWith('/api/')) return;
+    let url: URL;
+    try {
+      url = new URL(raw, window.location.origin);
+    } catch {
+      return;
+    }
+    if (url.origin !== window.location.origin) return; // "//other-host/..." 這類協議相對外部連結
+    const path = url.pathname + url.search + url.hash;
     e.preventDefault();
     if (!checkLeave(path)) return; // 已經 preventDefault，攔下就留在原頁彈確認 modal
     commitNavigate(path);
@@ -415,7 +461,7 @@ import { usePathRoute } from './lib/nav';
       </a>
 ```
 
-（path routing 下 `#main` 是真的同頁錨點，`installLinkNavigation` 的選擇器只認 `a[href^="/"]`，不會攔到 `#main`，瀏覽器原生錨點跳轉 + `<main id="main" tabIndex={-1}>` 既有的 `tabIndex` 就足夠讓 focus 移過去，不用再自己攔截。）
+（path routing 下 `#main` 是真的同頁錨點，`installLinkNavigation` 只在 `href` 以 `/` 開頭且同源時才攔截，`#main` 不符合條件不會被攔到，瀏覽器原生錨點跳轉 + `<main id="main" tabIndex={-1}>` 既有的 `tabIndex` 就足夠讓 focus 移過去，不用再自己攔截。）
 
 - [ ] **Step 4: `kg.tsx` 的 `LeaveGuardHost` 改呼叫新函式**
 
@@ -470,6 +516,7 @@ cd app/web && npm run build && cd ../api
 3. 按瀏覽器上一頁／下一頁，頁面正確跟著換。
 4. 開一個編輯頁（例如角色編輯）故意留下未儲存變更，點站內另一個連結離開，應該跳出既有的「儲存並離開／捨棄離開／取消」三選一 modal，行為跟改動前一致。
 5. cmd/ctrl+click 站內連結應該在新分頁打開，不應該被攔截。
+6. **最關鍵的一項**：直接在網址列輸入一個深層路徑（例如 `http://localhost:8787/p/some-slug/manage`）按 Enter 直接進入，或是在任一頁按瀏覽器重新整理。這是分享連結真正會走的路徑——別人從 Discord 點連結進來，或使用者重新整理頁面，都是這個情境，只有這一項測得出 Task 1 的 fallback 是不是真的生效。Expected：頁面正常顯示對應內容，不是空白頁或 404。
 
 - [ ] **Step 7: Commit**
 
