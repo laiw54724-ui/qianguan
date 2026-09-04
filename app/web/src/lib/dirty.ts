@@ -57,6 +57,15 @@ export function setLeaveGuard(g: LeaveGuard | null) {
   guard = g;
 }
 
+/** 真的把網址換掉：pushState/replaceState 之後手動發一個 popstate 事件，讓所有訂閱者
+ * （usePathRoute）統一走同一條「網址變了」的通知路徑——pushState()/replaceState() 本身
+ * 不會觸發 popstate，只有瀏覽器上一頁/下一頁才會，這裡補上讓兩種來源行為一致。 */
+export function commitNavigate(path: string, replace = false) {
+  if (replace) window.history.replaceState(null, '', path);
+  else window.history.pushState(null, '', path);
+  window.dispatchEvent(new PopStateEvent('popstate'));
+}
+
 /** navigate() 專用：回傳 true 允許換頁；false 表示已攔截並跳出確認 modal */
 export function checkLeave(path: string): boolean {
   if (!guard || !guard.isDirty()) return true;
@@ -70,21 +79,6 @@ export function checkLeave(path: string): boolean {
 export function subscribeLeaveGuard(fn: () => void): () => void {
   listeners.add(fn);
   return () => listeners.delete(fn);
-}
-
-/** 站內 <a href="#/..."> 不經 navigate()，在 capture 階段攔截 */
-export function installClickGuard(): () => void {
-  const onClick = (e: MouseEvent) => {
-    const a = (e.target as HTMLElement).closest?.('a[href^="#/"]') as HTMLAnchorElement | null;
-    if (!a) return;
-    const path = (a.getAttribute('href') ?? '').slice(1);
-    if (path && !checkLeave(path)) {
-      e.preventDefault();
-      e.stopPropagation();
-    }
-  };
-  document.addEventListener('click', onClick, true);
-  return () => document.removeEventListener('click', onClick, true);
 }
 
 export function getPendingPath(): string | null {
@@ -108,7 +102,7 @@ export async function resolveLeave(action: 'save' | 'discard' | 'cancel'): Promi
   pendingPath = null;
   guard = null;
   notify();
-  location.hash = '#' + path;
+  commitNavigate(path);
 }
 
 /** 編輯頁掛守衛：beforeunload + 路由攔截。dirty 內容變動時重新註冊。 */

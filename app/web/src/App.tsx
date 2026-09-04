@@ -1,5 +1,5 @@
 import { useEffect, type ReactNode } from 'react';
-import { useHashPath } from './lib/nav';
+import { usePathRoute } from './lib/nav';
 import { LeaveGuardHost, RouteProgress, Toaster, toast } from './components/kg';
 import Poster from './pages/Poster';
 import Home from './pages/Home';
@@ -14,7 +14,7 @@ import RelationsPage from './pages/Relations';
 import ManagePage from './pages/Manage';
 
 export default function App() {
-  const { path, isPending } = useHashPath();
+  const { path, isPending } = usePathRoute();
   const seg = path.split('/').filter(Boolean);
 
   // 全域兜底：任何漏接的非同步錯誤（例如儲存空間不足）都用 toast 告知，不靜默
@@ -50,17 +50,7 @@ export default function App() {
 
   return (
     <>
-      <a
-        href="#main"
-        className="kg-skiplink"
-        onClick={(e) => {
-          // hash 路由中 #main 會被當成路由，所以改用 JS 聚焦
-          e.preventDefault();
-          const el = document.getElementById('main');
-          el?.focus();
-          el?.scrollIntoView({ block: 'start' });
-        }}
-      >
+      <a href="#main" className="kg-skiplink">
         跳到主要內容
       </a>
       <RouteProgress isPending={isPending} />

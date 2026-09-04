@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState, type FocusEvent, type FormEvent, type InputHTMLAttributes, type ReactNode, type TextareaHTMLAttributes } from 'react';
-import { href } from '../lib/nav';
-import { getPendingPath, installClickGuard, resolveLeave, subscribeLeaveGuard } from '../lib/dirty';
+import { href, installLinkNavigation } from '../lib/nav';
+import { getPendingPath, resolveLeave, subscribeLeaveGuard } from '../lib/dirty';
 
 // ---------- 頭像 ----------
 // 無上傳圖時：依角色名生成專屬色塊頭像（品牌雙圓／幾何塊，與 logo 同源）
@@ -78,7 +78,7 @@ export function LeaveGuardHost() {
   const [, force] = useState(0);
   const [busy, setBusy] = useState(false);
   useEffect(() => subscribeLeaveGuard(() => force((x) => x + 1)), []);
-  useEffect(() => installClickGuard(), []);
+  useEffect(() => installLinkNavigation(), []);
   const pending = getPendingPath();
   if (!pending) return null;
   return (
