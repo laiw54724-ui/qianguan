@@ -13,10 +13,10 @@ beforeEach(async () => {
   projectId = `prj_test_${crypto.randomUUID().slice(0, 8)}`;
   const slug = `slug-${projectId}`;
   const now = Date.now();
-  await db.insert(projects).values({ id: projectId, slug, title: '測試企劃', ownerTokenHash: 'x', createdAt: now, updatedAt: now });
+  await db.insert(projects).values({ id: projectId, slug, title: '測試企劃', createdAt: now, updatedAt: now });
   ownerCharId = `chr_owner_${crypto.randomUUID().slice(0, 8)}`;
   await db.insert(characters).values({
-    id: ownerCharId, projectId, name: '我的角色', status: 'active', editTokenHash: 'x', createdAt: now, updatedAt: now,
+    id: ownerCharId, projectId, name: '我的角色', status: 'active', createdAt: now, updatedAt: now,
   });
 });
 
@@ -39,7 +39,7 @@ describe('create / listFor', () => {
     const now = Date.now();
     const realCharId = `chr_real_${crypto.randomUUID().slice(0, 8)}`;
     await db.insert(characters).values({
-      id: realCharId, projectId, name: '阿楠', status: 'active', editTokenHash: 'x', createdAt: now, updatedAt: now,
+      id: realCharId, projectId, name: '阿楠', status: 'active', createdAt: now, updatedAt: now,
     });
     await priv.create(db, projectId, ownerCharId, '阿楠', '', '');
     const rows = await priv.listFor(db, projectId, ownerCharId);
@@ -50,7 +50,7 @@ describe('create / listFor', () => {
     const now = Date.now();
     const draftCharId = `chr_draft_${crypto.randomUUID().slice(0, 8)}`;
     await db.insert(characters).values({
-      id: draftCharId, projectId, name: '阿楠', status: 'draft', editTokenHash: 'x', createdAt: now, updatedAt: now,
+      id: draftCharId, projectId, name: '阿楠', status: 'draft', createdAt: now, updatedAt: now,
     });
     await priv.create(db, projectId, ownerCharId, '阿楠', '', '');
     const rows = await priv.listFor(db, projectId, ownerCharId);
@@ -61,7 +61,7 @@ describe('create / listFor', () => {
     const now = Date.now();
     const otherOwnerId = `chr_other_${crypto.randomUUID().slice(0, 8)}`;
     await db.insert(characters).values({
-      id: otherOwnerId, projectId, name: '別人的角色', status: 'active', editTokenHash: 'x', createdAt: now, updatedAt: now,
+      id: otherOwnerId, projectId, name: '別人的角色', status: 'active', createdAt: now, updatedAt: now,
     });
     await priv.create(db, projectId, ownerCharId, '阿楠', '', '');
     const rows = await priv.listFor(db, projectId, otherOwnerId);
@@ -82,7 +82,7 @@ describe('update / remove', () => {
     const now = Date.now();
     const otherOwnerId = `chr_other2_${crypto.randomUUID().slice(0, 8)}`;
     await db.insert(characters).values({
-      id: otherOwnerId, projectId, name: '別人的角色', status: 'active', editTokenHash: 'x', createdAt: now, updatedAt: now,
+      id: otherOwnerId, projectId, name: '別人的角色', status: 'active', createdAt: now, updatedAt: now,
     });
     const created = await priv.create(db, projectId, ownerCharId, '阿楠', '', '');
     const r = await priv.update(db, otherOwnerId, created.row.id, '改壞', '');

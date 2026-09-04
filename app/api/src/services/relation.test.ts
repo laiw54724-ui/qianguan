@@ -15,12 +15,12 @@ beforeEach(async () => {
   projectId = `prj_test_${crypto.randomUUID().slice(0, 8)}`;
   slug = `slug-${projectId}`;
   const now = Date.now();
-  await db.insert(projects).values({ id: projectId, slug, title: '測試企劃', ownerTokenHash: 'x', createdAt: now, updatedAt: now });
+  await db.insert(projects).values({ id: projectId, slug, title: '測試企劃', createdAt: now, updatedAt: now });
   const c1 = `chr_a_${crypto.randomUUID().slice(0, 8)}`;
   const c2 = `chr_b_${crypto.randomUUID().slice(0, 8)}`;
   await db.insert(characters).values([
-    { id: c1, projectId, name: '角色A', status: 'active', editTokenHash: 'x', createdAt: now, updatedAt: now },
-    { id: c2, projectId, name: '角色B', status: 'active', editTokenHash: 'x', createdAt: now, updatedAt: now },
+    { id: c1, projectId, name: '角色A', status: 'active', createdAt: now, updatedAt: now },
+    { id: c2, projectId, name: '角色B', status: 'active', createdAt: now, updatedAt: now },
   ]);
   [aId, bId] = [c1, c2].sort();
 });

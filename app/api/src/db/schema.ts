@@ -19,9 +19,7 @@ export const projects = sqliteTable('projects', {
   joinMode: text('join_mode').notNull().default('open'), // open|code
   joinCodeHash: text('join_code_hash'),
   signupsOpen: integer('signups_open', { mode: 'boolean' }).notNull().default(true),
-  ownerTokenHash: text('owner_token_hash').notNull(),
-  ownerDiscordId: text('owner_discord_id'), // §4.4 預留
-  transferCodeHash: text('transfer_code_hash'), // §8 預留
+  ownerDiscordId: text('owner_discord_id'), // 唯一擁有權欄位（Discord 唯一身分）
   isVerified: integer('is_verified', { mode: 'boolean' }).notNull().default(false),
   announcement: text('announcement'),
   fieldSchema: text('field_schema', { mode: 'json' }).$defaultFn(() => []), // JSON: FieldDef[]
@@ -46,8 +44,7 @@ export const characters = sqliteTable(
     blocks: text('blocks', { mode: 'json' }).$defaultFn(() => []), // JSON: WorldBlock[]
     links: text('links', { mode: 'json' }).$defaultFn(() => []), // JSON: SocialLink[]
     tags: text('tags', { mode: 'json' }).$defaultFn(() => []), // JSON: string[]
-    editTokenHash: text('edit_token_hash').notNull(),
-    discordId: text('discord_id'), // §4.4 預留
+    discordId: text('discord_id'), // 唯一擁有權欄位（Discord 唯一身分）
     status: text('status').notNull().default('active'), // active|draft|removed（draft＝完成前不公開，§12）
     createdAt: integer('created_at').notNull(),
     updatedAt: integer('updated_at').notNull(),

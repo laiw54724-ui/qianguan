@@ -21,7 +21,7 @@ beforeEach(async () => {
   slug = `slug-${projectId}`;
   const now = Date.now();
   await db.insert(projects).values({
-    id: projectId, slug, title: '測試企劃', ownerTokenHash: 'x', createdAt: now, updatedAt: now,
+    id: projectId, slug, title: '測試企劃', createdAt: now, updatedAt: now,
   });
 
   const joined = await char.joinProject(db, slug, undefined, { name: '測試角色' });
