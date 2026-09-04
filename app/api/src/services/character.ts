@@ -6,8 +6,7 @@
 import { and, eq, ne } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { characters, events, type CharacterRow } from '../db/schema';
-import { AUTH_FAIL, genPublicId, genToken, normJoinCode, sha256hex } from '../auth/token';
-import { charCookieLine, charCookieLineRotate, charTokens, resolveToken } from '../auth/guard';
+import { AUTH_FAIL, genPublicId, normJoinCode, sha256hex } from '../auth/token';
 import { getProjectRaw } from './project';
 import { fromJson, sanitizeLinks, sanitizeTags, type WorldBlock } from './shapes';
 
@@ -56,16 +55,18 @@ export async function getChar(db: DB, slug: string, charId: string) {
 
 // ---- 加入企劃（建 draft 角色；首次儲存才公開）----
 
+const MAX_CHARS_PER_OWNER = 20;
+
 export async function joinProject(
   db: DB,
   slug: string,
-  cookieHeader: string | undefined,
+  discordId: string,
   input: {
     name: string; one_liner?: string; avatar_url?: string;
     profile?: Record<string, string>; blocks?: WorldBlock[]; join_code?: string;
     links?: unknown; tags?: unknown;
   },
-): Promise<{ ok: true; character: ReturnType<typeof toChar>; charToken: string; cookie: string } | { error: string }> {
+): Promise<{ ok: true; character: ReturnType<typeof toChar> } | { error: string }> {
   const p = await getProjectRaw(db, slug);
   if (!p) return { error: AUTH_FAIL };
   if (!p.signupsOpen) return { error: '這個企劃目前沒有開放加入' };
@@ -76,7 +77,10 @@ export async function joinProject(
   const name = input.name.trim();
   if (!name) return { error: '名字不能留空' };
 
-  const charToken = genToken('chr');
+  const existing = await db.select({ id: characters.id }).from(characters)
+    .where(and(eq(characters.projectId, p.id), eq(characters.discordId, discordId), ne(characters.status, 'removed')));
+  if (existing.length >= MAX_CHARS_PER_OWNER) return { error: `這個企劃裡最多只能開 ${MAX_CHARS_PER_OWNER} 隻角色` };
+
   const id = await genCharIdUnique(db);
   const now = Date.now();
   await db.insert(characters).values({
@@ -90,17 +94,12 @@ export async function joinProject(
     links: sanitizeLinks(input.links),
     tags: sanitizeTags(input.tags),
     status: 'draft',
-    editTokenHash: await sha256hex(charToken),
+    discordId,
     createdAt: now,
     updatedAt: now,
   });
   const c = (await getCharRaw(db, p.id, id))!;
-  return {
-    ok: true,
-    character: toChar(c),
-    charToken,
-    cookie: charCookieLine(slug, p.id, cookieHeader, charToken),
-  };
+  return { ok: true, character: toChar(c) };
 }
 
 // ---- 讀取 ----
@@ -109,25 +108,6 @@ export async function listChars(db: DB, projectId: string) {
   const rows = await db.select().from(characters)
     .where(and(eq(characters.projectId, projectId), eq(characters.status, 'active')));
   return rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')).map(toChar);
-}
-
-// ---- 權杖驗證 ----
-
-export async function verifyCharToken(
-  db: DB,
-  slug: string,
-  charId: string,
-  cookieHeader: string | undefined,
-  bodyToken: string,
-): Promise<{ character: ReturnType<typeof toChar>; cookie?: string } | null> {
-  const got = await getChar(db, slug, charId);
-  if (!got) return null;
-  const r = await resolveToken(cookieHeader, got.project.id, 'c', bodyToken, got.character.editTokenHash);
-  if (!r.ok) return null;
-  return {
-    character: toChar(got.character),
-    cookie: r.plant ? charCookieLine(slug, got.project.id, cookieHeader, bodyToken.trim()) : undefined,
-  };
 }
 
 // ---- 更新（首次儲存＝啟用＋char_joined；之後＝char_updated；都要 batch）----
@@ -197,37 +177,6 @@ export async function shareCharUpdate(
     payload: { name: c.name, note: trimmed.slice(0, 140) }, createdAt: Date.now(),
   });
   return { ok: true };
-}
-
-// ---- 1-4：重看編輯碼（重新產生一組新的，不是找回原本那組——原始權杖只存雜湊，
-// 拿不回來；但使用者當下就在自己的角色頁，等於已經驗過身分，直接發一組新的
-// 讓他重新抄一次，跟貼碼救援達到同樣效果，體感更順）----
-
-export async function rotateCharToken(
-  db: DB,
-  slug: string,
-  charId: string,
-  cookieHeader: string | undefined,
-): Promise<{ character: ReturnType<typeof toChar>; charToken: string; cookie: string } | { error: string }> {
-  const got = await getChar(db, slug, charId);
-  if (!got) return { error: AUTH_FAIL };
-  const { project: p, character: c } = got;
-  let oldToken: string | null = null;
-  for (const t of charTokens(cookieHeader, p.id)) {
-    if ((await sha256hex(t)) === c.editTokenHash) { oldToken = t; break; }
-  }
-  if (!oldToken) return { error: AUTH_FAIL };
-
-  const newToken = genToken('chr');
-  const now = Date.now();
-  await db.update(characters).set({ editTokenHash: await sha256hex(newToken), updatedAt: now })
-    .where(eq(characters.id, c.id));
-  const updated = (await getCharRaw(db, p.id, c.id))!;
-  return {
-    character: toChar(updated),
-    charToken: newToken,
-    cookie: charCookieLineRotate(slug, p.id, cookieHeader, oldToken, newToken),
-  };
 }
 
 // ---- 移除（soft-delete，§6.8；開設者操作，權杖在路由層驗）----

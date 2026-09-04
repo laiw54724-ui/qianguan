@@ -1,11 +1,10 @@
 // services/project.ts — 移植 web/src/lib/store.ts 的專案相關函式。
 // 規則：邏輯照抄；localStorage 換 Drizzle；不輸出任何 *_hash 欄位。
 
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { characters, events, projects, relations, type ProjectRow } from '../db/schema';
-import { AUTH_FAIL, genSlug, genToken, normJoinCode, sha256hex } from '../auth/token';
-import { resolveToken, ownerCookieLine } from '../auth/guard';
+import { AUTH_FAIL, genSlug, normJoinCode, sha256hex } from '../auth/token';
 import { fromJson, sanitizeLinks, sanitizeTagGroups, type FieldDef, type WorldBlock } from './shapes';
 import { toChar } from './character';
 
@@ -69,11 +68,10 @@ export async function createProject(
     visibility?: string; join_mode: string; join_code?: string;
     links?: unknown;
   },
+  ownerDiscordId: string,
 ) {
   const slug = await genSlugUnique(db);
   const now = Date.now();
-  const ownerToken = genToken('own');
-  const transferCode = genToken('inv');
   const id = `prj_${genSlug()}`;
   await db.insert(projects).values({
     id,
@@ -85,8 +83,7 @@ export async function createProject(
     visibility: input.visibility === 'public' ? 'public' : 'unlisted',
     joinMode: input.join_mode === 'code' ? 'code' : 'open',
     joinCodeHash: input.join_code ? await sha256hex(normJoinCode(input.join_code)) : null,
-    ownerTokenHash: await sha256hex(ownerToken),
-    transferCodeHash: await sha256hex(transferCode),
+    ownerDiscordId,
     fieldSchema: DEFAULT_FIELDS,
     tagGroups: [],
     links: sanitizeLinks(input.links),
@@ -94,12 +91,7 @@ export async function createProject(
     updatedAt: now,
   });
   const row = (await getProjectRaw(db, slug))!;
-  return {
-    project: toProject(row),
-    ownerToken,
-    transferCode,
-    cookie: ownerCookieLine(slug, id, ownerToken),
-  };
+  return { project: toProject(row) };
 }
 
 // ---- 列表 ----
@@ -116,24 +108,6 @@ export async function listPublicProjects(db: DB) {
   return rows
     .sort((a, b) => b.createdAt - a.createdAt)
     .map(toProject);
-}
-
-// ---- 權杖驗證（統一失敗訊息 AUTH_FAIL，不洩漏是哪一邊錯）----
-
-export async function verifyOwner(
-  db: DB,
-  slug: string,
-  cookieHeader: string | undefined,
-  bodyToken: string,
-): Promise<{ project: ReturnType<typeof toProject>; cookie?: string } | null> {
-  const p = await getProjectRaw(db, slug);
-  if (!p) return null;
-  const r = await resolveToken(cookieHeader, p.id, 'o', bodyToken, p.ownerTokenHash);
-  if (!r.ok) return null;
-  return {
-    project: toProject(p),
-    cookie: r.plant ? ownerCookieLine(slug, p.id, bodyToken.trim()) : undefined,
-  };
 }
 
 // ---- 更新（公告變更＝多筆寫入，batch）----
@@ -234,4 +208,32 @@ export async function stats(db: DB, slug: string) {
   const [{ n: pending_relations }] = await db.select({ n: sql<number>`count(*)` }).from(relations)
     .where(and(eq(relations.projectId, p.id), eq(relations.status, 'pending')));
   return { members, pending_relations, accepted_relations };
+}
+
+// ---- 總覽（規格「Dashboard」：登入後列出自己開的企劃 + 自己的所有角色，跨企劃）----
+
+export interface DashboardData {
+  owned_projects: ReturnType<typeof toProject>[];
+  characters: Array<ReturnType<typeof toChar> & { project_slug: string; project_title: string }>;
+}
+
+export async function dashboardFor(db: DB, discordId: string): Promise<DashboardData> {
+  const ownedRows = await db.select().from(projects).where(eq(projects.ownerDiscordId, discordId));
+  const charRows = await db.select().from(characters)
+    .where(and(eq(characters.discordId, discordId), ne(characters.status, 'removed')));
+  const projectIds = [...new Set(charRows.map((c) => c.projectId))];
+  const projRows = projectIds.length
+    ? await db.select().from(projects).where(inArray(projects.id, projectIds))
+    : [];
+  const projMap = new Map(projRows.map((p) => [p.id, p]));
+  return {
+    owned_projects: ownedRows.sort((a, b) => b.createdAt - a.createdAt).map(toProject),
+    characters: charRows
+      .map((c) => {
+        const p = projMap.get(c.projectId);
+        return p ? { ...toChar(c), project_slug: p.slug, project_title: p.title } : null;
+      })
+      .filter((x): x is NonNullable<typeof x> => x !== null)
+      .sort((a, b) => b.updated_at - a.updated_at),
+  };
 }

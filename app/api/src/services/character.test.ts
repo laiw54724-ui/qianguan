@@ -1,6 +1,6 @@
-// character.ts 的兩塊新邏輯的回歸測試：
-// 1-3 動態牆改主動發布——patchChar 只在 share_note 非空時才寫 char_updated 事件。
-// 1-4 重看編輯碼——rotateCharToken 換發新權杖、舊權杖同時失效。
+// character.ts 的 1-3 動態牆改主動發布的回歸測試：
+// patchChar 只在第一次存檔時自動寫 char_joined，之後的存檔不再自動寫 char_updated；
+// 要分享用獨立的 shareCharUpdate()。
 import { env } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
 import { eq } from 'drizzle-orm';
@@ -13,8 +13,6 @@ const db = drizzle(env.DB);
 let slug: string;
 let projectId: string;
 let charId: string;
-let charToken: string;
-let cookieHeader: string;
 
 beforeEach(async () => {
   projectId = `prj_test_${crypto.randomUUID().slice(0, 8)}`;
@@ -24,11 +22,9 @@ beforeEach(async () => {
     id: projectId, slug, title: '測試企劃', createdAt: now, updatedAt: now,
   });
 
-  const joined = await char.joinProject(db, slug, undefined, { name: '測試角色' });
+  const joined = await char.joinProject(db, slug, `d_${crypto.randomUUID().slice(0, 8)}`, { name: '測試角色' });
   if (!('ok' in joined)) throw new Error('setup: joinProject failed');
   charId = joined.character.id;
-  charToken = joined.charToken;
-  cookieHeader = `kg_c_${projectId}=${charToken}`;
 });
 
 async function eventsFor(type?: string) {
@@ -73,28 +69,24 @@ describe('shareCharUpdate（1-3 存檔後才問的分享）', () => {
   });
 });
 
-describe('rotateCharToken（1-4 重看編輯碼）', () => {
-  it('換發新權杖後，舊權杖不能再用，新權杖可以', async () => {
-    const r = await char.rotateCharToken(db, slug, charId, cookieHeader);
-    expect('charToken' in r).toBe(true);
-    if (!('charToken' in r)) return;
-
-    const withOld = await char.verifyCharToken(db, slug, charId, undefined, charToken);
-    expect(withOld).toBeNull();
-
-    const withNew = await char.verifyCharToken(db, slug, charId, undefined, r.charToken);
-    expect(withNew).not.toBeNull();
+describe('joinProject 角色數量上限（同一 discord_id 最多 20 隻）', () => {
+  it('第 21 隻角色被拒絕，前 20 隻不受影響', async () => {
+    const discordId = `d_${crypto.randomUUID().slice(0, 8)}`;
+    for (let i = 0; i < 20; i++) {
+      const r = await char.joinProject(db, slug, discordId, { name: `角色${i}` });
+      expect('ok' in r).toBe(true);
+    }
+    const r21 = await char.joinProject(db, slug, discordId, { name: '角色21' });
+    expect('error' in r21).toBe(true);
   });
 
-  it('新 cookie 換掉舊 token，不是疊加——同一個角色不會留下兩個同時有效的權杖', async () => {
-    const r = await char.rotateCharToken(db, slug, charId, cookieHeader);
-    if (!('cookie' in r)) throw new Error('rotate failed');
-    expect(r.cookie).toContain(r.charToken);
-    expect(r.cookie).not.toContain(charToken);
-  });
-
-  it('cookie 裡沒有這隻角色有效權杖時拒絕（不能憑空重發）', async () => {
-    const r = await char.rotateCharToken(db, slug, charId, `kg_c_${projectId}=chr_wrongtoken00000000000000000`);
-    expect('error' in r).toBe(true);
+  it('不同 discord_id 各自獨立計算上限', async () => {
+    const a = `d_${crypto.randomUUID().slice(0, 8)}`;
+    const b = `d_${crypto.randomUUID().slice(0, 8)}`;
+    for (let i = 0; i < 20; i++) {
+      await char.joinProject(db, slug, a, { name: `A${i}` });
+    }
+    const rb = await char.joinProject(db, slug, b, { name: 'B的角色' });
+    expect('ok' in rb).toBe(true);
   });
 });
