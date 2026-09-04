@@ -7,6 +7,7 @@ import NewProject from './pages/NewProject';
 import ProjectPage from './pages/Project';
 import RosterPage from './pages/Roster';
 import MinePage from './pages/Mine';
+import DashboardPage from './pages/Dashboard';
 import JoinPage from './pages/Join';
 import CharacterPage from './pages/Character';
 import CharEditPage from './pages/CharEdit';
@@ -32,6 +33,7 @@ export default function App() {
   if (seg.length === 0) page = <Poster />;
   else if (seg[0] === 'home') page = <Home />;
   else if (seg[0] === 'new') page = <NewProject />;
+  else if (seg[0] === 'dashboard') page = <DashboardPage />;
   else if (seg[0] === 'p' && seg[1]) {
     const slug = seg[1];
     if (seg.length === 2) page = <ProjectPage slug={slug} />;
