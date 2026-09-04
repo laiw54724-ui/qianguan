@@ -18,12 +18,6 @@ export interface WorldBlock {
   fields: Record<string, unknown>[];
 }
 
-export interface RelationExtra {
-  id: string;
-  title: string;
-  content: string;
-}
-
 export interface SocialLink {
   id: string;
   platform: string;

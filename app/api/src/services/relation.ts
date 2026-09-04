@@ -4,11 +4,10 @@
 // 接受牽線＝update + 動態，兩筆寫入包 db.batch()。
 // charId 一律是公開短碼（characters.id）。
 
-import { and, eq, or } from 'drizzle-orm';
+import { and, eq, inArray, or } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
-import { events, relations, type RelationRow } from '../db/schema';
+import { events, relationNotes, relations, type RelationRow } from '../db/schema';
 import { getCharRaw } from './character';
-import { fromJson, type RelationExtra } from './shapes';
 
 type DB = DrizzleD1Database;
 
@@ -16,6 +15,13 @@ export function sideOf(rel: RelationRow, charId: string): 'a' | 'b' | null {
   if (rel.aId === charId) return 'a';
   if (rel.bId === charId) return 'b';
   return null;
+}
+
+export interface RelationNoteView {
+  id: number;
+  body: string;
+  author_side: 'a' | 'b';
+  created_at: number;
 }
 
 export function toRel(r: RelationRow) {
@@ -28,12 +34,24 @@ export function toRel(r: RelationRow) {
     a_note: r.aNote,
     b_label: r.bLabel,
     b_note: r.bNote,
-    extras: fromJson<RelationExtra[]>(r.extras, []),
     status: r.status,
     initiator: r.initiator,
     created_at: r.createdAt,
     updated_at: r.updatedAt,
   };
+}
+
+/** 批次抓一批關係的筆記，避免列表端點一筆關係查一次筆記（N+1）。 */
+async function notesForRelations(db: DB, relIds: number[]): Promise<Map<number, RelationNoteView[]>> {
+  if (!relIds.length) return new Map();
+  const rows = await db.select().from(relationNotes).where(inArray(relationNotes.relationId, relIds));
+  const map = new Map<number, RelationNoteView[]>();
+  for (const r of rows.sort((a, b) => a.createdAt - b.createdAt)) {
+    const list = map.get(r.relationId) ?? [];
+    list.push({ id: r.id, body: r.body, author_side: r.authorSide as 'a' | 'b', created_at: r.createdAt });
+    map.set(r.relationId, list);
+  }
+  return map;
 }
 
 async function getRelRaw(db: DB, projectId: string, relId: number) {
@@ -51,7 +69,6 @@ export async function initiate(
   targetId: string,
   label: string,
   note: string,
-  extras: RelationExtra[],
 ): Promise<{ ok: true; relation: ReturnType<typeof toRel> } | { error: string }> {
   if (fromId === targetId) return { error: '不能跟自己牽線' };
   const from = await getCharRaw(db, projectId, fromId);
@@ -79,7 +96,6 @@ export async function initiate(
         aNote: initiator === 'a' ? note : '',
         bLabel: initiator === 'b' ? label : '',
         bNote: initiator === 'b' ? note : '',
-        extras,
         updatedAt: now,
       })
       .where(eq(relations.id, r.id));
@@ -95,7 +111,6 @@ export async function initiate(
     aNote: initiator === 'a' ? note : '',
     bLabel: initiator === 'b' ? label : '',
     bNote: initiator === 'b' ? note : '',
-    extras,
     status: 'pending',
     initiator,
     createdAt: now,
@@ -177,25 +192,6 @@ export async function patchSide(
   return { ok: true };
 }
 
-// ---- 雙方共編的「其他補充」區塊（整組取代）----
-
-export async function patchExtras(
-  db: DB,
-  projectId: string,
-  relId: number,
-  actorCharId: string,
-  extras: RelationExtra[],
-): Promise<{ ok: true } | { error: string }> {
-  const r = await getRelRaw(db, projectId, relId);
-  if (!r) return { error: '牽線不存在' };
-  if (r.status !== 'accepted') return { error: '牽線成立後才能編輯' };
-  if (!sideOf(r, actorCharId)) return { error: '你不是這條牽線的當事人' };
-  await db.update(relations)
-    .set({ extras, updatedAt: Date.now() })
-    .where(eq(relations.id, r.id));
-  return { ok: true };
-}
-
 // ---- 斷線（刪列；角色才 soft-delete，§6.8）----
 
 export async function unwire(
@@ -211,17 +207,66 @@ export async function unwire(
   return { ok: true };
 }
 
+// ---- 雙方共用的互動筆記（relation_notes，取代原本定義不清的 extras）----
+// 規則：accepted 狀態才能寫；雙方都能新增；只有作者能刪自己那條；不做編輯歷史。
+
+export async function addNote(
+  db: DB,
+  projectId: string,
+  relId: number,
+  actorCharId: string,
+  body: string,
+): Promise<{ ok: true; note: RelationNoteView } | { error: string }> {
+  const r = await getRelRaw(db, projectId, relId);
+  if (!r) return { error: '牽線不存在' };
+  if (r.status !== 'accepted') return { error: '牽線成立後才能寫共用筆記' };
+  const side = sideOf(r, actorCharId);
+  if (!side) return { error: '你不是這條牽線的當事人' };
+  const trimmed = body.trim();
+  if (!trimmed) return { error: '內容不能留空' };
+  const now = Date.now();
+  const inserted = await db.insert(relationNotes).values({
+    relationId: relId, body: trimmed, authorSide: side, createdAt: now,
+  }).returning();
+  const row = inserted[0];
+  return { ok: true, note: { id: row.id, body: row.body, author_side: row.authorSide as 'a' | 'b', created_at: row.createdAt } };
+}
+
+export async function deleteNote(
+  db: DB,
+  projectId: string,
+  relId: number,
+  noteId: number,
+  actorCharId: string,
+): Promise<{ ok: true } | { error: string }> {
+  const r = await getRelRaw(db, projectId, relId);
+  if (!r) return { error: '牽線不存在' };
+  const side = sideOf(r, actorCharId);
+  if (!side) return { error: '你不是這條牽線的當事人' };
+  const rows = await db.select().from(relationNotes)
+    .where(and(eq(relationNotes.id, noteId), eq(relationNotes.relationId, relId))).limit(1);
+  const noteRow = rows[0];
+  if (!noteRow) return { error: '筆記不存在' };
+  if (noteRow.authorSide !== side) return { error: '只能刪除自己寫的筆記' };
+  await db.delete(relationNotes).where(eq(relationNotes.id, noteId));
+  return { ok: true };
+}
+
 // ---- 查詢 ----
 
 // 當事人視角（牽線管理頁）：全部狀態都回；路由層已驗當事人或開設者身分
 export async function forChar(db: DB, projectId: string, charId: string) {
   const rows = await db.select().from(relations)
     .where(and(eq(relations.projectId, projectId), or(eq(relations.aId, charId), eq(relations.bId, charId))));
-  return rows.sort((a, b) => b.updatedAt - a.updatedAt).map(toRel);
+  const sorted = rows.sort((a, b) => b.updatedAt - a.updatedAt);
+  const notesMap = await notesForRelations(db, sorted.map((r) => r.id));
+  return sorted.map((r) => ({ ...toRel(r), notes: notesMap.get(r.id) ?? [] }));
 }
 
 export async function accepted(db: DB, projectId: string) {
   const rows = await db.select().from(relations)
     .where(and(eq(relations.projectId, projectId), eq(relations.status, 'accepted')));
-  return rows.sort((a, b) => b.updatedAt - a.updatedAt).map(toRel);
+  const sorted = rows.sort((a, b) => b.updatedAt - a.updatedAt);
+  const notesMap = await notesForRelations(db, sorted.map((r) => r.id));
+  return sorted.map((r) => ({ ...toRel(r), notes: notesMap.get(r.id) ?? [] }));
 }
