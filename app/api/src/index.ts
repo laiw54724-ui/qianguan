@@ -9,8 +9,11 @@ import type { DrizzleD1Database } from 'drizzle-orm/d1';
 import { and, eq, inArray, ne } from 'drizzle-orm';
 import { z } from 'zod';
 import { characters, type ProjectRow } from './db/schema';
-import { AUTH_FAIL, sha256hex } from './auth/token';
-import { charTokens, ownerToken } from './auth/guard';
+import { AUTH_FAIL } from './auth/token';
+import { sessionCookieClear } from './auth/guard';
+import { validateNextPath } from './auth/nextPath';
+import { createState, consumeState } from './auth/oauthState';
+import { exchangeCode, fetchDiscordId } from './auth/discordOAuth';
 import { csrfGuard, securityHeaders, rateLimitGuard } from './middleware/security';
 import { verifyTurnstile } from './turnstile';
 import * as schema from './schemas';
@@ -19,12 +22,17 @@ import * as charSvc from './services/character';
 import * as relSvc from './services/relation';
 import * as privRelSvc from './services/privateRelation';
 import * as eventSvc from './services/event';
+import * as sessionSvc from './services/session';
 import { fetchPageTitle } from './services/preview';
 
 type Bindings = {
   DB: D1Database;
   ASSETS: Fetcher;
   RATE_LIMITER: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  DISCORD_RATE_LIMITER: { limit(options: { key: string }): Promise<{ success: boolean }> };
+  OAUTH_STATE: KVNamespace;
+  DISCORD_CLIENT_ID: string;
+  DISCORD_CLIENT_SECRET: string;
   TURNSTILE_SECRET?: string;
   PUBLIC_SITE_NAME?: string;
 };
@@ -46,37 +54,45 @@ async function parseBody<T>(c: { req: { json: () => Promise<unknown> } }, s: z.Z
   return r.success ? r.data : null;
 }
 
-// ---- viewer / 權杖 helpers ----
+// ---- viewer / session helpers ----
 
-async function isOwnerReq(p: ProjectRow, cookieHeader?: string) {
-  const t = ownerToken(cookieHeader, p.id);
-  return !!t && (await sha256hex(t)) === p.ownerTokenHash;
+async function isOwnerReq(p: ProjectRow, d: DrizzleD1Database, cookieHeader?: string): Promise<boolean> {
+  const session = await sessionSvc.resolveSession(d, cookieHeader);
+  return !!session && session.discordId === p.ownerDiscordId;
 }
 
-async function ownedCharIds(d: DrizzleD1Database, projectId: string, cookieHeader?: string) {
-  const tokens = charTokens(cookieHeader, projectId);
-  if (!tokens.length) return [] as string[];
-  const hashes = await Promise.all(tokens.map((t) => sha256hex(t)));
+async function ownedCharIds(d: DrizzleD1Database, projectId: string, cookieHeader?: string): Promise<string[]> {
+  const session = await sessionSvc.resolveSession(d, cookieHeader);
+  if (!session) return [];
   const rows = await d.select({ id: characters.id }).from(characters)
-    .where(and(eq(characters.projectId, projectId), inArray(characters.editTokenHash, hashes), ne(characters.status, 'removed')));
+    .where(and(eq(characters.projectId, projectId), eq(characters.discordId, session.discordId), ne(characters.status, 'removed')));
   return rows.map((r) => r.id);
 }
 
-/** 開設者或持有任一角色權杖 */
+/** 開設者（project.owner_discord_id 對得上目前 session） */
 async function requireOwner(d: DrizzleD1Database, slug: string, cookieHeader?: string) {
   const p = await projectSvc.getProjectRaw(d, slug);
   if (!p) return null;
-  return (await isOwnerReq(p, cookieHeader)) ? p : null;
+  return (await isOwnerReq(p, d, cookieHeader)) ? p : null;
 }
 
-/** 持有「這一隻角色」的權杖 */
+/** 持有「這一隻角色」的所有權（discord_id 對得上，編輯用） */
 async function requireChar(d: DrizzleD1Database, slug: string, charId: string, cookieHeader?: string) {
   const got = await charSvc.getChar(d, slug, charId);
   if (!got) return null;
-  const tokens = charTokens(cookieHeader, got.project.id);
-  for (const t of tokens) {
-    if ((await sha256hex(t)) === got.character.editTokenHash) return got;
-  }
+  const session = await sessionSvc.resolveSession(d, cookieHeader);
+  if (!session || session.discordId !== got.character.discordId) return null;
+  return got;
+}
+
+/** requireChar 成立，或是這個角色所屬企劃的開設者（移除用；開設者能移除但不能編輯） */
+async function requireCharManage(d: DrizzleD1Database, slug: string, charId: string, cookieHeader?: string) {
+  const got = await charSvc.getChar(d, slug, charId);
+  if (!got) return null;
+  const session = await sessionSvc.resolveSession(d, cookieHeader);
+  if (!session) return null;
+  if (session.discordId === got.character.discordId) return got;
+  if (session.discordId === got.project.ownerDiscordId) return got;
   return null;
 }
 
@@ -100,6 +116,62 @@ app.get('/api/link-preview', async (c) => {
 app.get('/api/projects/similar', async (c) =>
   c.json(await projectSvc.findSimilarProjects(db(c), c.req.query('title') ?? '')));
 
+// ================= Discord 登入 =================
+
+app.get('/api/auth/discord/login', async (c) => {
+  const next = validateNextPath(c.req.query('next'));
+  const stateId = await createState(c.env.OAUTH_STATE, next);
+  const redirectUri = new URL('/api/auth/discord/callback', c.req.url).toString();
+  const authUrl = new URL('https://discord.com/api/oauth2/authorize');
+  authUrl.searchParams.set('client_id', c.env.DISCORD_CLIENT_ID);
+  authUrl.searchParams.set('redirect_uri', redirectUri);
+  authUrl.searchParams.set('response_type', 'code');
+  authUrl.searchParams.set('scope', 'identify');
+  authUrl.searchParams.set('state', stateId);
+  return c.redirect(authUrl.toString());
+});
+
+app.get('/api/auth/discord/callback', async (c) => {
+  const stateId = c.req.query('state');
+  if (!stateId) return c.redirect('/dashboard');
+  const stored = await consumeState(c.env.OAUTH_STATE, stateId);
+  if (!stored) return c.redirect('/dashboard');
+  if (c.req.query('error')) return c.redirect(stored.next); // 使用者取消授權，當作改變心意，不顯示錯誤
+  const code = c.req.query('code');
+  if (!code) return c.redirect(stored.next);
+
+  const redirectUri = new URL('/api/auth/discord/callback', c.req.url).toString();
+  const accessToken = await exchangeCode(c.env.DISCORD_CLIENT_ID, c.env.DISCORD_CLIENT_SECRET, code, redirectUri);
+  if (!accessToken) return c.redirect(stored.next);
+  const discordId = await fetchDiscordId(accessToken);
+  if (!discordId) return c.redirect(stored.next);
+
+  const d = db(c);
+  await sessionSvc.revokeCurrentSession(d, cookieOf(c)); // 不分支：一律先撤銷這條 cookie 目前指到的 session，再建新的
+  const { cookie } = await sessionSvc.createSession(d, discordId);
+  c.header('Set-Cookie', cookie, { append: true });
+  return c.redirect(stored.next);
+});
+
+app.get('/api/me', async (c) => {
+  const session = await sessionSvc.resolveSession(db(c), cookieOf(c));
+  return c.json({ discordId: session?.discordId ?? null });
+});
+
+app.post('/api/auth/logout', async (c) => {
+  await sessionSvc.revokeCurrentSession(db(c), cookieOf(c));
+  c.header('Set-Cookie', sessionCookieClear(), { append: true });
+  return c.json({ ok: true });
+});
+
+app.post('/api/auth/logout-all', async (c) => {
+  const d = db(c);
+  const session = await sessionSvc.resolveSession(d, cookieOf(c));
+  if (session) await sessionSvc.revokeAllSessions(d, session.discordId);
+  c.header('Set-Cookie', sessionCookieClear(), { append: true });
+  return c.json({ ok: true });
+});
+
 app.post('/api/projects', async (c) => {
   const input = await parseBody(c, schema.createProjectSchema);
   if (!input) return c.json({ error: '參數格式不正確' }, 400);
@@ -115,7 +187,7 @@ app.get('/api/p/:slug', async (c) => {
   const p = await projectSvc.getProjectRaw(d, c.req.param('slug'));
   if (!p) return c.json({ error: AUTH_FAIL }, 404);
   const viewer = {
-    isOwner: await isOwnerReq(p, cookieOf(c)),
+    isOwner: await isOwnerReq(p, d, cookieOf(c)),
     myCharIds: await ownedCharIds(d, p.id, cookieOf(c)),
   };
   return c.json({ ...projectSvc.toProject(p), viewer });
@@ -133,7 +205,7 @@ app.get('/api/p/:slug/c/:charId', async (c) => {
   const got = await charSvc.getChar(d, c.req.param('slug'), c.req.param('charId'));
   if (!got) return c.json({ error: AUTH_FAIL }, 404);
   // draft 角色只有本人與開設者看得見（§12：完成前不公開）
-  const owner = await isOwnerReq(got.project, cookieOf(c));
+  const owner = await isOwnerReq(got.project, d, cookieOf(c));
   const mine = (await ownedCharIds(d, got.project.id, cookieOf(c))).includes(got.character.id);
   if (got.character.status === 'draft' && !owner && !mine) return c.json({ error: AUTH_FAIL }, 404);
   return c.json({
