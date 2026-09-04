@@ -162,8 +162,6 @@ export interface Character {
   blocks: WorldBlock[];
   links?: SocialLink[];
   tags?: string[];
-  slot?: boolean;
-  edit_token_hash: string;
   status: CharStatus;
   created_at: number;
   updated_at: number;

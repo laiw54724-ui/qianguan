@@ -27,9 +27,19 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     },
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
+  if (res.status === 401 && !path.startsWith('/me')) {
+    redirectToLogin();
+  }
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new ApiError(res.status, (data.error as string) || AUTH_FAIL);
   return data as T;
+}
+
+/** 401 一律導去登入，帶回目前路徑；`/me`／`/me/dashboard` 自己已經用 null 身分處理未登入，不用被攔截，
+ * 否則首次載入頁面時 SiteHeader/Dashboard 探測登入狀態的呼叫會被立刻導去登入頁，形成迴圈。 */
+function redirectToLogin() {
+  const next = encodeURIComponent(window.location.pathname + window.location.search);
+  window.location.href = `/api/auth/discord/login?next=${next}`;
 }
 
 type Result = { ok: true } | { ok: false; error: string };
@@ -51,6 +61,44 @@ export interface Viewer {
 export type ProjectView = Project & { viewer: Viewer };
 export type CharacterView = { project: Project; character: Character; viewer: { owned: boolean; isOwner: boolean } };
 
+// ---------- Discord 身分 ----------
+export async function getMe(): Promise<string | null> {
+  try {
+    const r = await req<{ discordId: string | null }>('GET', '/me');
+    return r.discordId;
+  } catch {
+    return null;
+  }
+}
+
+export async function logout(): Promise<void> {
+  await tryReq('POST', '/auth/logout');
+}
+
+export async function logoutAll(): Promise<void> {
+  await tryReq('POST', '/auth/logout-all');
+}
+
+export interface DashboardCharacter {
+  id: string;
+  project_id: string;
+  name: string;
+  one_liner: string;
+  avatar_url: string | null;
+  status: string;
+  project_slug: string;
+  project_title: string;
+}
+
+export interface DashboardData {
+  owned_projects: Project[];
+  characters: DashboardCharacter[];
+}
+
+export async function getDashboard(): Promise<DashboardData> {
+  return req<DashboardData>('GET', '/me/dashboard');
+}
+
 // ---------- 企劃 ----------
 export interface NewProjectInput {
   title: string;
@@ -60,7 +108,6 @@ export interface NewProjectInput {
   visibility: Visibility;
   join_mode: JoinMode;
   join_code?: string;
-  turnstile?: string; // Turnstile token（§6.6）
   links?: SocialLink[];
 }
 
@@ -80,8 +127,7 @@ export async function fetchLinkPreview(url: string): Promise<{ title: string }> 
   }
 }
 
-export async function createProject(input: NewProjectInput): Promise<{ project: Project; ownerToken: string }> {
-  // 回應同時種 kg_o_ cookie；ownerToken 只出現這一次（畫面顯示一次，§4.1）
+export async function createProject(input: NewProjectInput): Promise<{ project: Project }> {
   return req('POST', '/projects', input);
 }
 
@@ -91,16 +137,6 @@ export async function getProject(slug: string): Promise<ProjectView | undefined>
   } catch (e) {
     if (e instanceof ApiError && e.status === 404) return undefined;
     throw e;
-  }
-}
-
-/** 開設者身分驗證：cookie 優先；貼碼救援時帶 token，成功即種 cookie */
-export async function verifyOwner(slug: string, token = ''): Promise<Project | null> {
-  try {
-    const r = await req<{ project: Project }>('POST', `/p/${encodeURIComponent(slug)}/owner-session`, { token });
-    return r.project;
-  } catch {
-    return null;
   }
 }
 
@@ -125,7 +161,7 @@ export async function updateProject(slug: string, patch: ProjectPatch): Promise<
   return tryReq('PATCH', `/p/${encodeURIComponent(slug)}`, patch);
 }
 
-export async function removeCharacter(slug: string, _token: string, charId: string): Promise<Result> {
+export async function removeCharacter(slug: string, charId: string): Promise<Result> {
   return tryReq('DELETE', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}`);
 }
 
@@ -148,16 +184,13 @@ export interface JoinInput {
   blocks?: WorldBlock[];
   links?: SocialLink[];
   tags?: string[];
-  claim_id?: string;
   join_code?: string;
-  turnstile?: string;
 }
 
 export async function joinProject(
   slug: string,
   input: JoinInput,
-): Promise<{ ok: true; character: Character; charToken: string } | { ok: false; error: string }> {
-  // 成功時回應種 kg_c_ cookie；charToken 只出現這一次
+): Promise<{ ok: true; character: Character } | { ok: false; error: string }> {
   return tryReq('POST', `/p/${encodeURIComponent(slug)}/join`, input);
 }
 
@@ -180,16 +213,6 @@ export async function getCharacter(slug: string, charId: string): Promise<Charac
   }
 }
 
-/** 角色本人驗證：cookie 優先；貼編輯碼救援時帶 token，成功即種 cookie */
-export async function verifyCharToken(slug: string, charId: string, token = ''): Promise<Character | null> {
-  try {
-    const r = await req<{ character: Character }>('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/session`, { token });
-    return r.character;
-  } catch {
-    return null;
-  }
-}
-
 export interface CharacterPatch {
   name: string;
   one_liner: string;
@@ -200,7 +223,7 @@ export interface CharacterPatch {
   tags?: string[];
 }
 
-export async function updateCharacter(slug: string, charId: string, _token: string, patch: CharacterPatch): Promise<Result> {
+export async function updateCharacter(slug: string, charId: string, patch: CharacterPatch): Promise<Result> {
   // 首次儲存 draft→active 由後端處理（§12：新建角色在完成前不公開）
   return tryReq('PATCH', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}`, patch);
 }
@@ -208,15 +231,6 @@ export async function updateCharacter(slug: string, charId: string, _token: stri
 // 1-3：存檔後才問的「要不要跟大家說一聲？」，獨立於存檔本身，使用者自己決定要不要送
 export async function shareCharUpdate(slug: string, charId: string, note: string): Promise<Result> {
   return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/share`, { note });
-}
-
-// 1-4：重看編輯碼——換發一組新的（不是找回原本那組，權杖只存雜湊拿不回來），
-// 前提是目前這個瀏覽器已經持有這隻角色有效的 kg_c_ cookie。
-export async function rotateCharToken(
-  slug: string,
-  charId: string,
-): Promise<{ ok: true; character: Character; charToken: string } | { ok: false; error: string }> {
-  return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/rotate-token`, {});
 }
 
 // ---------- 單人可用性（private_relations，1.5-2，取代 draft-char）----------
@@ -260,24 +274,20 @@ export function sideOf(rel: Relation, charId: string): 'a' | 'b' | null {
 export async function initiateRelation(
   slug: string,
   charId: string,
-  _token: string,
   targetId: string,
   label: string,
   note: string,
-  turnstile = '',
 ): Promise<Result> {
   return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/relations`, {
     targetId,
     label,
     note,
-    turnstile,
   });
 }
 
 export async function respondRelation(
   slug: string,
   charId: string,
-  _token: string,
   relId: number,
   action: 'accept' | 'decline',
   label: string,
@@ -289,7 +299,6 @@ export async function respondRelation(
 export async function updateRelationSide(
   slug: string,
   charId: string,
-  _token: string,
   relId: number,
   label: string,
   note: string,
@@ -300,7 +309,6 @@ export async function updateRelationSide(
 export async function addRelationNote(
   slug: string,
   charId: string,
-  _token: string,
   relId: number,
   body: string,
 ): Promise<{ ok: true; note: RelationNote } | { ok: false; error: string }> {
@@ -310,14 +318,13 @@ export async function addRelationNote(
 export async function deleteRelationNote(
   slug: string,
   charId: string,
-  _token: string,
   relId: number,
   noteId: number,
 ): Promise<Result> {
   return tryReq('DELETE', `/p/${encodeURIComponent(slug)}/relations/${relId}/notes/${noteId}`, { charId });
 }
 
-export async function unwireRelation(slug: string, charId: string, _token: string, relId: number): Promise<Result> {
+export async function unwireRelation(slug: string, charId: string, relId: number): Promise<Result> {
   return tryReq('POST', `/p/${encodeURIComponent(slug)}/relations/${relId}/unwire`, { charId });
 }
 
