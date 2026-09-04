@@ -1,6 +1,7 @@
 // Drizzle schema — 唯一真相來源（規格 §3.1）
-// 備註：world_blocks / qa / icon_url / characters.blocks / relations.extras 是原型已上線的
+// 備註：world_blocks / qa / icon_url / characters.blocks 是原型已上線的
 // 擴充欄位（JSON TEXT），規格 §3.1 最小欄位集之外的「做了沒寫」部分，在此補齊。
+// relations.extras 已在 1.5-1 拿掉，換成 relation_notes 表。
 import { sqliteTable, text, integer, uniqueIndex, index, check } from 'drizzle-orm/sqlite-core';
 import { sql } from 'drizzle-orm';
 
