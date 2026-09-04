@@ -15,13 +15,24 @@
       "migrations_dir": "drizzle"
     }
   ],
-  // §6.4 速率限制：Turnstile 只掛在建立/加入/發起牽線；貼碼救援端點（owner-session／c/:id/session）
-  // 刻意不掛 Turnstile（規格 §6.6：不對權杖驗證加驗證碼），靠這個 IP 節流頂著。
+  "kv_namespaces": [
+    {
+      "binding": "OAUTH_STATE",
+      "id": "0b68d4fdeb9b4ed283f87dcbb1b9ccd7"
+    }
+  ],
+  // §6.4 速率限制：RATE_LIMITER 是全站 IP 節流；DISCORD_RATE_LIMITER 另外掛在建企劃／加入／
+  // 發起牽線，鍵值是 discord_id，取代已移除的 Turnstile 當作濫用防線。
   "ratelimits": [
     {
       "name": "RATE_LIMITER",
       "namespace_id": "1001",
       "simple": { "limit": 30, "period": 60 }
+    },
+    {
+      "name": "DISCORD_RATE_LIMITER",
+      "namespace_id": "1002",
+      "simple": { "limit": 10, "period": 60 }
     }
   ],
   "observability": {
