@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
+  addRelationNote,
   createDraftCharacter,
+  deleteRelationNote,
   getCharacter,
   initiateRelation,
   listCharacters,
@@ -8,7 +10,6 @@ import {
   respondRelation,
   sideOf,
   unwireRelation,
-  updateRelationExtras,
   updateRelationSide,
   verifyCharToken,
 } from '../lib/api';
@@ -17,7 +18,7 @@ import { PageLoading,
   CharAvatar,
   EmptyNote,
   ErrorBox,
-  ExtrasEditor,
+  RelationNotes,
   SecLabel,
   ThreadLink,
   TokenGate,
@@ -25,7 +26,7 @@ import { PageLoading,
   toast,
 } from '../components/kg';
 import { ProjectShell } from '../components/project-shell';
-import type { Character, Project, Relation, RelationExtra } from '../lib/types';
+import type { Character, Project, Relation } from '../lib/types';
 
 export default function RelationsPage({ slug, charId }: { slug: string; charId: string }) {
   const [data, setData] = useState<{ project: Project; character: Character } | null | undefined>(undefined);
@@ -43,7 +44,6 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   const [targetId, setTargetId] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [newNote, setNewNote] = useState('');
-  const [newExtras, setNewExtras] = useState<RelationExtra[]>([]);
   const [turnstileToken, setTurnstileToken] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -64,7 +64,6 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   const [editLabel, setEditLabel] = useState<Record<number, string>>({});
   const [editNote, setEditNote] = useState<Record<number, string>>({});
   const [extrasOpen, setExtrasOpen] = useState<Record<number, boolean>>({});
-  const [editExtras, setEditExtras] = useState<Record<number, RelationExtra[]>>({});
   const [notice, setNotice] = useState<string | null>(null);
 
   const refresh = async () => {
@@ -189,14 +188,12 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
     if (!turnstileToken) return setFormError('請先完成真人驗證');
     setBusy(true);
     try {
-      const extras = newExtras.map((x) => ({ ...x, title: x.title.trim() })).filter((x) => x.title || x.content.trim());
-      const res = await initiateRelation(slug, charId, token, targetId, newLabel, newNote, extras, turnstileToken);
+      const res = await initiateRelation(slug, charId, token, targetId, newLabel, newNote, turnstileToken);
       if (!res.ok) return setFormError(res.error);
       setTargetId('');
       setQuery('');
       setNewLabel('');
       setNewNote('');
-      setNewExtras([]);
       setTurnstileToken('');
       setNotice('已發出牽線，等對方補完後公開。');
       await refresh();
@@ -254,13 +251,15 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
     await refresh();
   };
 
-  const doUpdateExtras = async (r: Relation) => {
-    const id = r.id;
-    const clean = (editExtras[id] ?? []).map((x) => ({ ...x, title: x.title.trim() })).filter((x) => x.title || x.content.trim());
-    const res = await updateRelationExtras(slug, charId, token, id, clean);
+  const doAddNote = async (r: Relation, body: string) => {
+    const res = await addRelationNote(slug, charId, token, r.id, body);
     if (!res.ok) return toast(res.error, 'err');
-    setExtrasOpen((o) => ({ ...o, [id]: false }));
-    setNotice('其他補充已更新。');
+    await refresh();
+  };
+
+  const doDeleteNote = async (r: Relation, noteId: number) => {
+    const res = await deleteRelationNote(slug, charId, token, r.id, noteId);
+    if (!res.ok) return toast(res.error, 'err');
     await refresh();
   };
 
@@ -328,16 +327,6 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
                       <b>{theirLabelOf(r)}</b>
                     </p>
                     {theirNoteOf(r) && <p className="text-sm text-[#6f6156] leading-relaxed mb-4">{theirNoteOf(r)}</p>}
-                    {r.extras.length > 0 && (
-                      <div className="mb-4 space-y-2">
-                        {r.extras.map((x) => (
-                          <div key={x.id}>
-                            <div className="kg-seclabel mb-0.5">（{x.title}）</div>
-                            <p className="text-sm text-[#6f6156] leading-relaxed whitespace-pre-wrap">{x.content}</p>
-                          </div>
-                        ))}
-                      </div>
-                    )}
                     <div className="grid sm:grid-cols-2 gap-3">
                       <div>
                         <label htmlFor="fld-Relations-1" className="kg-label">你眼中的 {other.name}（稱呼）*</label>
@@ -451,12 +440,9 @@ id="fld-Relations-2"                           className="kg-input"
                         <button
                           type="button"
                           className="kg-pill kg-pill-sm kg-pill-ghost"
-                          onClick={() => {
-                            setExtrasOpen((o) => ({ ...o, [r.id]: !editingExtras }));
-                            setEditExtras((m) => ({ ...m, [r.id]: r.extras }));
-                          }}
+                          onClick={() => setExtrasOpen((o) => ({ ...o, [r.id]: !editingExtras }))}
                         >
-                          {editingExtras ? '收起補充' : '其他補充'}
+                          {editingExtras ? '收起共用筆記' : '共用筆記'}
                         </button>
                         <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm" onClick={() => doUnwire(r)}>
                           解除
@@ -495,25 +481,16 @@ id="fld-Relations-2"                           className="kg-input"
                         </div>
                       </div>
                     )}
-                    {editingExtras ? (
+                    {editingExtras && (
                       <div className="mt-4 pt-4 border-t border-dashed border-[#e8dfd4] space-y-3">
-                        <div className="kg-seclabel">（其他補充・雙方共用）</div>
-                        <ExtrasEditor value={editExtras[r.id] ?? []} onChange={(v) => setEditExtras((m) => ({ ...m, [r.id]: v }))} />
-                        <button type="button" className="kg-pill kg-pill-red kg-pill-sm" onClick={() => doUpdateExtras(r)}>
-                          儲存其他補充
-                        </button>
+                        <div className="kg-seclabel">（共用筆記）</div>
+                        <RelationNotes
+                          notes={r.notes}
+                          mySide={sideOf(r, charId)!}
+                          onAdd={(body) => doAddNote(r, body)}
+                          onDelete={(noteId) => doDeleteNote(r, noteId)}
+                        />
                       </div>
-                    ) : (
-                      r.extras.length > 0 && (
-                        <div className="mt-4 pt-4 border-t border-dashed border-[#e8dfd4] space-y-3">
-                          {r.extras.map((x) => (
-                            <div key={x.id}>
-                              <div className="kg-seclabel mb-0.5">（{x.title}）</div>
-                              <p className="text-sm text-[#6f6156] leading-relaxed whitespace-pre-wrap">{x.content}</p>
-                            </div>
-                          ))}
-                        </div>
-                      )
                     )}
                   </div>
                 );
@@ -638,11 +615,6 @@ id="fld-Relations-5"                 className="kg-input"
                 <label htmlFor="fld-Relations-9" className="kg-label">關係註記</label>
                 <input id="fld-Relations-9" className="kg-input" value="由對方回應時填寫" disabled />
               </div>
-            </div>
-
-            <div>
-              <div className="kg-seclabel mb-2">（其他補充）</div>
-              <ExtrasEditor value={newExtras} onChange={setNewExtras} />
             </div>
 
             <TurnstileWidget token={turnstileToken} onChange={setTurnstileToken} />

@@ -853,7 +853,7 @@ import type {
   PaletteColor,
   QaItem,
   RadarDim,
-  RelationExtra,
+  RelationNote,
   TagGroup,
   TimelineEvent,
   WorldBlock,
@@ -3264,45 +3264,58 @@ export function FieldsEditor({ value, onChange }: { value: FieldDef[]; onChange:
 }
 
 // ---------- 牽線「其他補充」區塊編輯器（純文字） ----------
-export function ExtrasEditor({ value, onChange }: { value: RelationExtra[]; onChange: (v: RelationExtra[]) => void }) {
-  const patch = (id: string, p: Partial<RelationExtra>) => onChange(value.map((x) => (x.id === id ? { ...x, ...p } : x)));
+/** 雙方共用的互動筆記（1.5-1，取代原本的 ExtrasEditor）——條列、有作者、只有自己那條能刪。
+ * mySide 是操作者自己是 'a' 還是 'b'，用來判斷哪幾條可以顯示刪除按鈕。 */
+export function RelationNotes({
+  notes,
+  mySide,
+  onAdd,
+  onDelete,
+}: {
+  notes: RelationNote[];
+  mySide: 'a' | 'b';
+  onAdd: (body: string) => Promise<void>;
+  onDelete: (noteId: number) => Promise<void>;
+}) {
+  const [draft, setDraft] = useState('');
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    const body = draft.trim();
+    if (!body) return;
+    setBusy(true);
+    try {
+      await onAdd(body);
+      setDraft('');
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <div className="space-y-3">
-      {value.map((x) => (
-        <div key={x.id} className="kg-card-flat p-4 space-y-2.5">
-          <div className="flex items-center gap-2">
-            <ImeInput
-              className="kg-input !w-auto flex-1 font-bold"
-              value={x.title}
-              onChange={(v) => patch(x.id, { title: v })}
-              placeholder="區塊標題（如：兩人的回憶）"
-              maxLength={20}
-            />
-            <button
-              type="button"
-              className="kg-pill kg-pill-ghost kg-pill-sm text-[#a8455e] shrink-0"
-              onClick={() => onChange(value.filter((y) => y.id !== x.id))}
-            >
+      {notes.length === 0 && <p className="text-sm text-[#6f6156]">還沒有共用筆記。</p>}
+      {notes.map((n) => (
+        <div key={n.id} className="kg-card-flat p-3 flex items-start justify-between gap-3">
+          <p className="text-sm leading-relaxed whitespace-pre-wrap flex-1">{n.body}</p>
+          {n.author_side === mySide && (
+            <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm shrink-0" onClick={() => onDelete(n.id)}>
               刪除
             </button>
-          </div>
-          <ImeTextarea
-            className="kg-textarea"
-            rows={3}
-            value={x.content}
-            onChange={(v) => patch(x.id, { content: v })}
-            placeholder="補充內容…"
-            maxLength={1000}
-          />
+          )}
         </div>
       ))}
-      <button
-        type="button"
-        className="kg-pill kg-pill-ghost kg-pill-sm border-dashed"
-        onClick={() => onChange([...value, { id: uid('ex'), title: '', content: '' }])}
-      >
-        ＋ 新增區塊
-      </button>
+      <div className="flex gap-2">
+        <ImeTextarea
+          className="kg-textarea flex-1"
+          rows={2}
+          value={draft}
+          onChange={setDraft}
+          placeholder="寫一條兩人共用的互動筆記…"
+          maxLength={1000}
+        />
+        <button type="button" className="kg-pill kg-pill-sm shrink-0" disabled={busy || !draft.trim()} onClick={submit}>
+          {busy ? '送出中…' : '新增'}
+        </button>
+      </div>
     </div>
   );
 }

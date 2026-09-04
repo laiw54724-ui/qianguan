@@ -50,11 +50,12 @@ export interface TagGroup {
   required?: boolean;
 }
 
-// 牽線的「其他補充」自由區塊
-export interface RelationExtra {
-  id: string;
-  title: string;
-  content: string;
+// 牽線雙方共用的互動筆記（1.5-1，取代原本的 RelationExtra）
+export interface RelationNote {
+  id: number;
+  body: string;
+  author_side: 'a' | 'b';
+  created_at: number;
 }
 
 // 角色自訂欄位類型（名帖式）— 區塊與欄位共用
@@ -165,7 +166,7 @@ export interface Relation {
   a_note: string;
   b_label: string;
   b_note: string;
-  extras: RelationExtra[]; // 其他補充自由區塊（雙方共用）
+  notes: RelationNote[]; // 雙方共用的互動筆記（accepted 之後才有，1.5-1）
   status: RelStatus;
   initiator: 'a' | 'b';
   created_at: number;

@@ -1,7 +1,7 @@
 // 唯一的 fetch 封裝 — 對外暴露與原型 lib/store.ts 完全相同的函式名與參數，元件層不用改。
 // 規格 §6.3：所有 mutation 統一在這裡帶 X-KG: 1 自訂標頭；任何元件不得自己呼叫 fetch。
 // 權杖走 httpOnly cookie（credentials: 'same-origin'）；貼碼救援時把 token 放 body，後端驗過會順手種 cookie。
-import type { Character, FieldDef, JoinMode, KgEvent, Project, Relation, RelationExtra, TagGroup, Visibility, WorldBlock } from './types';
+import type { Character, FieldDef, JoinMode, KgEvent, Project, Relation, RelationNote, TagGroup, Visibility, WorldBlock } from './types';
 import type { SocialLink } from './links';
 
 const BASE = '/api';
@@ -242,14 +242,12 @@ export async function initiateRelation(
   targetId: string,
   label: string,
   note: string,
-  extras: RelationExtra[] = [],
   turnstile = '',
 ): Promise<Result> {
   return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/relations`, {
     targetId,
     label,
     note,
-    extras,
     turnstile,
   });
 }
@@ -277,14 +275,24 @@ export async function updateRelationSide(
   return tryReq('PATCH', `/p/${encodeURIComponent(slug)}/relations/${relId}/side`, { charId, label, note });
 }
 
-export async function updateRelationExtras(
+export async function addRelationNote(
   slug: string,
   charId: string,
   _token: string,
   relId: number,
-  extras: RelationExtra[],
+  body: string,
+): Promise<{ ok: true; note: RelationNote } | { ok: false; error: string }> {
+  return tryReq('POST', `/p/${encodeURIComponent(slug)}/relations/${relId}/notes`, { charId, body });
+}
+
+export async function deleteRelationNote(
+  slug: string,
+  charId: string,
+  _token: string,
+  relId: number,
+  noteId: number,
 ): Promise<Result> {
-  return tryReq('PATCH', `/p/${encodeURIComponent(slug)}/relations/${relId}/extras`, { charId, extras });
+  return tryReq('DELETE', `/p/${encodeURIComponent(slug)}/relations/${relId}/notes/${noteId}`, { charId });
 }
 
 export async function unwireRelation(slug: string, charId: string, _token: string, relId: number): Promise<Result> {

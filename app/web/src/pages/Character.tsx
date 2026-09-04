@@ -251,13 +251,10 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
                         <p className="text-sm leading-relaxed">{theirNote || '—'}</p>
                       </div>
                     </div>
-                    {r.extras.length > 0 && (
+                    {r.notes.length > 0 && (
                       <div className="mt-4 pt-4 border-t border-dashed border-[#e8dfd4] space-y-3">
-                        {r.extras.map((x) => (
-                          <div key={x.id}>
-                            <div className="kg-seclabel mb-0.5">（{x.title}）</div>
-                            <p className="text-sm leading-relaxed whitespace-pre-wrap text-[#4a3b31]">{x.content}</p>
-                          </div>
+                        {r.notes.map((n) => (
+                          <p key={n.id} className="text-sm leading-relaxed whitespace-pre-wrap text-[#4a3b31]">{n.body}</p>
                         ))}
                       </div>
                     )}
