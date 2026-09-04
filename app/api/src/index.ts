@@ -252,14 +252,6 @@ app.get('/api/p/:slug/roster', async (c) => {
   return c.json(await projectSvc.roster(d, c.req.param('slug')));
 });
 
-app.delete('/api/p/:slug/c/:charId', async (c) => {
-  const d = db(c);
-  if (!(await requireOwner(d, c.req.param('slug'), cookieOf(c)))) return c.json({ error: AUTH_FAIL }, 401);
-  const r = await charSvc.removeChar(d, c.req.param('slug'), c.req.param('charId'));
-  if ('error' in r) return c.json({ error: r.error }, 400);
-  return c.json({ ok: true });
-});
-
 // ================= 角色 =================
 
 app.post('/api/p/:slug/join', async (c) => {
@@ -272,6 +264,17 @@ app.post('/api/p/:slug/join', async (c) => {
   const r = await charSvc.joinProject(db(c), c.req.param('slug'), session.discordId, input);
   if ('error' in r) return c.json({ error: r.error }, 400);
   return c.json(r);
+});
+
+// 移除：requireChar 成立（角色本人）或這個角色所屬企劃的開設者，二者皆可移除，但只有角色本人能編輯
+app.delete('/api/p/:slug/c/:charId', async (c) => {
+  const d = db(c);
+  const slug = c.req.param('slug');
+  const charId = c.req.param('charId');
+  if (!(await requireCharManage(d, slug, charId, cookieOf(c)))) return c.json({ error: AUTH_FAIL }, 401);
+  const r = await charSvc.removeChar(d, slug, charId);
+  if ('error' in r) return c.json({ error: r.error }, 400);
+  return c.json({ ok: true });
 });
 
 app.patch('/api/p/:slug/c/:charId', async (c) => {
@@ -299,21 +302,6 @@ app.post('/api/p/:slug/c/:charId/share', async (c) => {
   const r = await charSvc.shareCharUpdate(d, slug, charId, input.note);
   if ('error' in r) return c.json({ error: r.error }, 400);
   return c.json(r);
-});
-
-// 1-4「重看編輯碼」：已經持有有效 kg_c_ cookie（人已經在自己的角色頁），
-// 不用再貼一次碼，直接發一組新的權杖取代舊的（舊碼因此失效，見 auth/guard.ts）
-app.post('/api/p/:slug/c/:charId/rotate-token', async (c) => {
-  const d = db(c);
-  const slug = c.req.param('slug');
-  const charId = c.req.param('charId');
-  if (!(await requireChar(d, slug, charId, cookieOf(c)))) {
-    return c.json({ error: AUTH_FAIL }, 401);
-  }
-  const r = await charSvc.rotateCharToken(d, slug, charId, cookieOf(c));
-  if ('error' in r) return c.json({ error: r.error }, 401);
-  c.header('Set-Cookie', r.cookie, { append: true });
-  return c.json({ ok: true, character: r.character, charToken: r.charToken });
 });
 
 // ================= 1.5-2：單人可用性（private_relations，取代 draft-char）=================

@@ -24,7 +24,7 @@ describe('dashboardFor', () => {
   it('列出自己開的企劃與自己的角色（跨企劃分組）', async () => {
     const discordId = `d_${crypto.randomUUID().slice(0, 8)}`;
     const other = `d_${crypto.randomUUID().slice(0, 8)}`;
-    const r1 = await projectSvc.createProject(db, { title: '企劃甲', summary: '', join_mode: 'open' }, discordId);
+    await projectSvc.createProject(db, { title: '企劃甲', summary: '', join_mode: 'open' }, discordId);
     const r2 = await projectSvc.createProject(db, { title: '企劃乙', summary: '', join_mode: 'open' }, other);
     const now = Date.now();
     await db.insert(characters).values({
