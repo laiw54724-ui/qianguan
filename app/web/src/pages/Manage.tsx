@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getProject, removeCharacter, rosterStats, updateProject, verifyOwner, type RosterRow } from '../lib/api';
+import { getProject, removeCharacter, rosterStats, updateProject, type RosterRow } from '../lib/api';
 import { href, timeAgo } from '../lib/nav';
 import { clearBuffer, loadBuffer, saveBuffer, useLeaveGuard } from '../lib/dirty';
 import {
@@ -15,7 +15,7 @@ import {
   SecLabel,
   StickySaveBar,
   TagGroupEditor,
-  TokenGate,
+  LoginPrompt,
   toast,
   type BlockEditorMode,
 } from '../components/kg';
@@ -45,10 +45,7 @@ interface FormState {
 
 export default function ManagePage({ slug }: { slug: string }) {
   const [project, setProject] = useState<Project | null | undefined>(undefined);
-  const [authed, setAuthed] = useState(false);
-  const [gateToken, setGateToken] = useState('');
-  const [gateError, setGateError] = useState<string | null>(null);
-  const [gateBusy, setGateBusy] = useState(false);
+  const [owner, setOwner] = useState<boolean | undefined>(undefined);
   const [saving, setSaving] = useState(false);
 
   const [title, setTitle] = useState('');
@@ -94,7 +91,7 @@ export default function ManagePage({ slug }: { slug: string }) {
     setWorldMode(p.world_blocks.length ? 'fill' : 'schema');
   };
 
-  const dirty = authed && snapshot.current !== '' && snapshot.current !== JSON.stringify({ ...currentForm(), joinCode: '' });
+  const dirty = !!owner && snapshot.current !== '' && snapshot.current !== JSON.stringify({ ...currentForm(), joinCode: '' });
 
   const refresh = async () => {
     // 1-2：名單統計跟企劃本身資料無關，並行抓
@@ -109,19 +106,18 @@ export default function ManagePage({ slug }: { slug: string }) {
       const p = await getProject(slug);
       setProject(p ?? null);
       if (!p) return;
-      const ok = await verifyOwner(slug); // cookie 優先
-      if (ok) {
-        setAuthed(true);
-        applyProject(ok);
+      setOwner(p.viewer.isOwner);
+      if (p.viewer.isOwner) {
+        applyProject(p);
         snapshot.current = JSON.stringify({ ...({
-          title: ok.title, summary: ok.summary, coverUrl: ok.cover_url ?? '', iconUrl: ok.icon_url ?? '',
-          visibility: ok.visibility, joinMode: ok.join_mode, joinCode: '', signupsOpen: ok.signups_open,
-          worldBlocks: ok.world_blocks, qa: ok.qa, fields: ok.field_schema, tagGroups: ok.tag_groups ?? [], links: ok.links ?? [],
+          title: p.title, summary: p.summary, coverUrl: p.cover_url ?? '', iconUrl: p.icon_url ?? '',
+          visibility: p.visibility, joinMode: p.join_mode, joinCode: '', signupsOpen: p.signups_open,
+          worldBlocks: p.world_blocks, qa: p.qa, fields: p.field_schema, tagGroups: p.tag_groups ?? [], links: p.links ?? [],
         }) });
         setRows(await rosterPromise);
         // 本機復原緩衝：比伺服器新就問（§12-6）
         const buf = loadBuffer<FormState>(BUF_KEY(slug));
-        if (buf && buf.savedAt > ok.updated_at) setRestorable(buf.data);
+        if (buf && buf.savedAt > p.updated_at) setRestorable(buf.data);
       }
     })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -190,7 +186,7 @@ export default function ManagePage({ slug }: { slug: string }) {
   const doRemove = async (charId: string, name: string) => {
     if (!window.confirm(`確定移除「${name}」？此為軟刪除，紀錄保留但角色不再公開。`)) return;
     try {
-      const res = await removeCharacter(slug, '', charId);
+      const res = await removeCharacter(slug, charId);
       if (!res.ok) {
         toast(res.error, 'err');
         return;
@@ -217,30 +213,19 @@ export default function ManagePage({ slug }: { slug: string }) {
     );
   }
 
-  if (!authed) {
+  if (owner === false) {
     return (
       <ProjectShell slug={slug} title={project.title} active="settings">
         <div className="px-4 sm:px-6 py-16">
-          <TokenGate
-            title="開設者後台"
-            hint="貼上建立企劃時保存的開設者碼。這台裝置驗證過就會記住。"
-            token={gateToken}
-            setToken={setGateToken}
-            busy={gateBusy}
-            error={gateError}
-            onSubmit={async () => {
-              setGateBusy(true);
-              setGateError(null);
-              const ok = await verifyOwner(slug, gateToken); // 驗過後端會種 cookie
-              setGateBusy(false);
-              if (!ok) return setGateError('企劃不存在或權杖錯誤');
-              setAuthed(true);
-              applyProject(ok);
-              snapshot.current = JSON.stringify({ ...currentForm(), joinCode: '' });
-              setRows(await rosterStats(slug));
-            }}
-          />
+          <LoginPrompt title="開設者後台" hint="這是「開設者」專屬的頁面。用開這個企劃時的同一個 Discord 帳號登入即可進入。" />
         </div>
+      </ProjectShell>
+    );
+  }
+  if (owner === undefined) {
+    return (
+      <ProjectShell slug={slug} title={project.title} active="settings">
+        <PageLoading text="正在打開開設者後台…" />
       </ProjectShell>
     );
   }
@@ -467,12 +452,7 @@ export default function ManagePage({ slug }: { slug: string }) {
                       <a href={href(`/p/${slug}/c/${c.id}`)} className="flex items-center gap-2 font-bold hover:text-[#9e4b2c]">
                         <CharAvatar name={c.name} url={c.avatar_url} size={30} />
                         {c.name}
-                        {c.slot && (
-                          <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
-                            空位
-                          </span>
-                        )}
-                        {!c.slot && c.status === 'draft' && (
+                        {c.status === 'draft' && (
                           <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
                             草稿
                           </span>

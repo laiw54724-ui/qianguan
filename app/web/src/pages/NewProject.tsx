@@ -10,9 +10,6 @@ import {
   SiteFooter,
   SiteHeader,
   StickySaveBar,
-  TokenReveal,
-  TurnstileWidget,
-  TURNSTILE_REQUIRED,
 } from '../components/kg';
 import { SocialLinksEditor } from '../components/links';
 import { sanitizeLinks, type SocialLink } from '../lib/links';
@@ -27,20 +24,18 @@ export default function NewProject() {
   const [joinMode, setJoinMode] = useState<'open' | 'code'>('open');
   const [joinCode, setJoinCode] = useState('');
   const [links, setLinks] = useState<SocialLink[]>([]);
-  const [turnstileToken, setTurnstileToken] = useState(TURNSTILE_REQUIRED ? '' : 'dev-bypass');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const [similar, setSimilar] = useState<Project[] | null>(null);
   const [forceCreate, setForceCreate] = useState(false);
-  const [created, setCreated] = useState<{ project: Project; ownerToken: string } | null>(null);
+  const [created, setCreated] = useState<Project | null>(null);
 
   const submit = async () => {
     setError(null);
     const live = title.trim();
     if (!live) return setError('請填企劃名稱');
     if (joinMode === 'code' && !joinCode.trim()) return setError('加入模式選了「需要加入碼」，請設定加入碼');
-    if (TURNSTILE_REQUIRED && !turnstileToken) return setError('請先完成真人驗證');
     setBusy(true);
     try {
       if (!forceCreate) {
@@ -60,9 +55,8 @@ export default function NewProject() {
         join_mode: joinMode,
         join_code: joinCode,
         links: sanitizeLinks(links),
-        turnstile: turnstileToken || 'dev-bypass',
       });
-      setCreated(result);
+      setCreated(result.project);
     } finally {
       setBusy(false);
     }
@@ -75,16 +69,16 @@ export default function NewProject() {
         <main className="mx-auto max-w-xl px-4 sm:px-6 py-16 w-full">
           <div className="mb-6">
             <SecLabel>企劃已建立</SecLabel>
-            <h1 className="font-display font-black text-4xl mt-2">「{created.project.title}」</h1>
+            <h1 className="font-display font-black text-4xl mt-2">「{created.title}」</h1>
           </div>
-          <TokenReveal kind="owner" token={created.ownerToken} note="進入後台後可隨時修改企劃資訊；這組權杖也已存在此瀏覽器中。">
-            <a href={href(`/p/${created.project.slug}`)} className="kg-pill">
+          <div className="kg-card p-6 sm:p-8 kg-rise flex flex-wrap gap-3">
+            <a href={href(`/p/${created.slug}`)} className="kg-pill">
               前往企劃頁 →
             </a>
-            <a href={href(`/p/${created.project.slug}/manage`)} className="kg-pill kg-pill-ink">
+            <a href={href(`/p/${created.slug}/manage`)} className="kg-pill kg-pill-ink">
               進入開設者後台
             </a>
-          </TokenReveal>
+          </div>
         </main>
         <SiteFooter />
       </div>
@@ -183,8 +177,6 @@ export default function NewProject() {
           </div>
 
           <SocialLinksEditor value={links} onChange={setLinks} />
-
-          <TurnstileWidget token={turnstileToken} onChange={setTurnstileToken} />
 
           {error && <ErrorBox>{error}</ErrorBox>}
           <button type="button" className="kg-pill kg-pill-ghost" onClick={() => navigate('/home')}>

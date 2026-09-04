@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
-import { acceptedRelations, getCharacter, listCharacters, rotateCharToken, sideOf, verifyCharToken, type CharacterView } from '../lib/api';
+import { acceptedRelations, getCharacter, listCharacters, sideOf, type CharacterView } from '../lib/api';
 import { href } from '../lib/nav';
-import { PageLoading, BlockView, CharAvatar, EmptyNote, ErrorBox, FieldView, PreviewModal, SecLabel, ThreadLink, TokenReveal, toast, type PreviewTarget, type RosterLite } from '../components/kg';
+import { PageLoading, BlockView, CharAvatar, EmptyNote, FieldView, PreviewModal, SecLabel, ThreadLink, type PreviewTarget, type RosterLite } from '../components/kg';
 import { SocialLinkChips } from '../components/links';
 import { ProjectShell } from '../components/project-shell';
 import type { Character, Relation } from '../lib/types';
@@ -12,13 +12,7 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
   const [charMap, setCharMap] = useState<Map<string, Character>>(new Map());
   const [owned, setOwned] = useState(false);
   const [isOwner, setIsOwner] = useState(false); // 開設者（可看私人欄位）
-  const [claimToken, setClaimToken] = useState('');
-  const [claimError, setClaimError] = useState<string | null>(null);
-  const [claimOpen, setClaimOpen] = useState(false);
   const [preview, setPreview] = useState<{ block: PreviewTarget; idx: number } | null>(null);
-  // 1-4：重看編輯碼——不是找回原本那組（權杖只存雜湊拿不回來），是換發一組新的
-  const [newToken, setNewToken] = useState<string | null>(null);
-  const [rotating, setRotating] = useState(false);
 
   const refresh = async () => {
     // 1-2：三條查詢彼此不依賴，並行抓，不要排隊
@@ -68,30 +62,6 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
 
   const { project, character } = data;
 
-  const claim = async () => {
-    setClaimError(null);
-    const ok = await verifyCharToken(slug, charId, claimToken); // 驗過後端種 cookie
-    if (!ok) return setClaimError('企劃不存在或權杖錯誤');
-    setClaimOpen(false);
-    setClaimToken('');
-    refresh();
-  };
-
-  const doRotate = async () => {
-    if (!window.confirm('重新產生編輯碼會讓舊的那組失效（這台裝置會自動換成新的，不影響現在的存取）。確定要繼續嗎？')) return;
-    setRotating(true);
-    try {
-      const res = await rotateCharToken(slug, charId);
-      if (!res.ok) {
-        toast(res.error, 'err');
-        return;
-      }
-      setNewToken(res.charToken);
-    } finally {
-      setRotating(false);
-    }
-  };
-
   return (
     <ProjectShell slug={slug} title={project.title} active={null}>
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
@@ -105,12 +75,7 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="font-huninn text-4xl">{character.name}</h1>
               <span className="font-mono2 text-xs text-[#6f6156]">{character.id}</span>
-              {character.slot && (
-                <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
-                  空位・等人加入
-                </span>
-              )}
-              {!character.slot && character.status === 'draft' && (
+              {character.status === 'draft' && (
                 <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>
                   草稿・待認領
                 </span>
@@ -128,7 +93,7 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
               <SocialLinkChips links={character.links} />
             </div>
             <div className="flex flex-wrap gap-2.5 mt-4">
-              {owned ? (
+              {owned && (
                 <>
                   <a href={href(`/p/${slug}/c/${charId}/edit`)} className="kg-pill kg-pill-sm">
                     編輯角色
@@ -136,46 +101,11 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
                   <a href={href(`/p/${slug}/c/${charId}/relations`)} className="kg-pill kg-pill-sm kg-pill-sage">
                     牽線管理
                   </a>
-                  <button type="button" className="kg-pill kg-pill-sm kg-pill-ghost" disabled={rotating} onClick={() => { void doRotate(); }}>
-                    {rotating ? '產生中…' : '重看編輯碼'}
-                  </button>
                 </>
-              ) : character.slot ? (
-                <a href={href(`/p/${slug}/join?claim=${encodeURIComponent(character.name)}`)} className="kg-pill kg-pill-sm kg-pill-red">
-                  用「{character.name}」加入以認領
-                </a>
-              ) : (
-                <button type="button" className="kg-pill kg-pill-sm kg-pill-ghost" onClick={() => setClaimOpen((v) => !v)}>
-                  這是我的角色
-                </button>
               )}
             </div>
-            {claimOpen && !owned && (
-              <div className="kg-card-flat p-4 mt-4 max-w-md">
-                <label htmlFor="fld-Character-1" className="kg-label">貼上角色編輯碼以解鎖</label>
-                <input id="fld-Character-1" className="kg-input font-mono2" value={claimToken} onChange={(e) => setClaimToken(e.target.value)} placeholder="chr_…" autoComplete="off" />
-                {claimError && (
-                  <div className="mt-2">
-                    <ErrorBox>{claimError}</ErrorBox>
-                  </div>
-                )}
-                <button type="button" className="kg-pill kg-pill-red kg-pill-sm mt-3" onClick={claim}>
-                  驗證
-                </button>
-              </div>
-            )}
           </div>
         </div>
-
-        {newToken && (
-          <div className="mt-6 max-w-md">
-            <TokenReveal kind="char" token={newToken} note="這組取代了舊的編輯碼；舊的那組現在已經失效。">
-              <button type="button" className="kg-pill" onClick={() => setNewToken(null)}>
-                好，關掉這張卡
-              </button>
-            </TokenReveal>
-          </div>
-        )}
 
         {filledFields.length > 0 && (
           <section className="mt-10 kg-rise" style={{ animationDelay: '0.08s' }}>

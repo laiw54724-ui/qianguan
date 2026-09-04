@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getCharacter, listCharacters, shareCharUpdate, updateCharacter, verifyCharToken, type CharacterView } from '../lib/api';
+import { getCharacter, listCharacters, shareCharUpdate, updateCharacter, type CharacterView } from '../lib/api';
 import { href } from '../lib/nav';
 import { clearBuffer, loadBuffer, saveBuffer, useLeaveGuard } from '../lib/dirty';
 import {
@@ -14,8 +14,8 @@ import {
   SHELL_NAV_HEIGHT,
   SheetableField,
   StickySaveBar,
+  LoginPrompt,
   TagPicker,
-  TokenGate,
   toast,
   type BlockEditorMode,
   type RosterLite,
@@ -40,11 +40,8 @@ interface FormState {
 
 export default function CharEditPage({ slug, charId }: { slug: string; charId: string }) {
   const [data, setData] = useState<CharacterView | null | undefined>(undefined);
-  const [authed, setAuthed] = useState(false);
+  const [owner, setOwner] = useState<boolean | undefined>(undefined);
   const [roster, setRoster] = useState<RosterLite[]>([]);
-  const [gateToken, setGateToken] = useState('');
-  const [gateError, setGateError] = useState<string | null>(null);
-  const [gateBusy, setGateBusy] = useState(false);
 
   const [name, setName] = useState('');
   const [oneLiner, setOneLiner] = useState('');
@@ -78,7 +75,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
     setTags(c.tags ?? []);
   };
 
-  const dirty = authed && snapshot.current !== '' && snapshot.current !== JSON.stringify(currentForm());
+  const dirty = !!owner && snapshot.current !== '' && snapshot.current !== JSON.stringify(currentForm());
 
   useEffect(() => {
     (async () => {
@@ -87,17 +84,17 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
       const got = await getCharacter(slug, charId);
       setData(got);
       if (!got) return;
-      const ok = await verifyCharToken(slug, charId); // cookie 優先
-      if (ok) {
-        setAuthed(true);
+      setOwner(got.viewer.owned);
+      if (got.viewer.owned) {
         const snap: FormState = {
-          name: ok.name, oneLiner: ok.one_liner, avatarUrl: ok.avatar_url ?? '', profile: ok.profile, blocks: ok.blocks ?? [], links: ok.links ?? [], tags: ok.tags ?? [],
+          name: got.character.name, oneLiner: got.character.one_liner, avatarUrl: got.character.avatar_url ?? '',
+          profile: got.character.profile, blocks: got.character.blocks ?? [], links: got.character.links ?? [], tags: got.character.tags ?? [],
         };
         serverForm.current = snap;
         snapshot.current = JSON.stringify(snap);
-        applyChar(ok);
+        applyChar(got.character);
         const buf = loadBuffer<FormState>(BUF_KEY(charId));
-        if (buf && buf.savedAt > ok.updated_at) {
+        if (buf && buf.savedAt > got.character.updated_at) {
           applyChar({
             name: buf.data.name,
             one_liner: buf.data.oneLiner,
@@ -147,7 +144,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
     setBusy(true);
     const wasDraft = data.character.status === 'draft'; // 存檔前先記，存檔後 data 就變了
     try {
-      const res = await updateCharacter(slug, charId, '', {
+      const res = await updateCharacter(slug, charId, {
         name: name.trim(),
         one_liner: oneLiner.trim(),
         avatar_url: avatarUrl.trim(),
@@ -214,29 +211,11 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
     );
   }
 
-  if (!authed) {
-    // 權杖救回：清掉瀏覽器資料後，貼編輯碼即可重新取得編輯權（後端驗過會種 cookie）
+  if (owner === false) {
     return (
       <ProjectShell slug={slug} title={data.project.title} active={null}>
         <div className="px-4 sm:px-6 py-16">
-          <TokenGate
-            title={`編輯「${data.character.name}」`}
-            hint="貼上主辦或你自己保存的那串編輯碼。這台裝置驗證過就會記住。"
-            token={gateToken}
-            setToken={setGateToken}
-            busy={gateBusy}
-            error={gateError}
-            onSubmit={async () => {
-              setGateBusy(true);
-              setGateError(null);
-              const ok = await verifyCharToken(slug, charId, gateToken);
-              setGateBusy(false);
-              if (!ok) return setGateError('企劃不存在或權杖錯誤');
-              setAuthed(true);
-              applyChar(ok);
-              snapshot.current = JSON.stringify(currentForm());
-            }}
-          />
+          <LoginPrompt title={`編輯「${data.character.name}」`} hint="這是這隻角色本人專屬的頁面。用建立這隻角色時的同一個 Discord 帳號登入即可編輯。" />
         </div>
       </ProjectShell>
     );

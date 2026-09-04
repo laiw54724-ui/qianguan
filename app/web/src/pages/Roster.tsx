@@ -67,10 +67,7 @@ export default function RosterPage({ slug }: { slug: string }) {
                     <div className="font-bold flex items-center gap-2 flex-wrap">
                       {c.name}
                       <span className="font-mono2 text-[10px] text-[#6f6156] font-normal">{c.id}</span>
-                      {c.slot && (
-                        <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>空位</span>
-                      )}
-                      {!c.slot && c.status === 'draft' && (
+                      {c.status === 'draft' && (
                         <span className="kg-tag" style={{ background: '#fcebf0', color: '#a8455e' }}>草稿</span>
                       )}
                     </div>

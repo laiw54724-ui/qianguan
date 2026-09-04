@@ -14,18 +14,16 @@ import {
   sideOf,
   unwireRelation,
   updateRelationSide,
-  verifyCharToken,
 } from '../lib/api';
 import { href } from '../lib/nav';
 import { PageLoading,
   CharAvatar,
   EmptyNote,
   ErrorBox,
+  LoginPrompt,
   RelationNotes,
   SecLabel,
   ThreadLink,
-  TokenGate,
-  TurnstileWidget,
   toast,
 } from '../components/kg';
 import { ProjectShell } from '../components/project-shell';
@@ -33,10 +31,7 @@ import type { Character, PrivateRelation, Project, Relation } from '../lib/types
 
 export default function RelationsPage({ slug, charId }: { slug: string; charId: string }) {
   const [data, setData] = useState<{ project: Project; character: Character } | null | undefined>(undefined);
-  const [token, setToken] = useState<string | null>(null);
-  const [gateToken, setGateToken] = useState('');
-  const [gateError, setGateError] = useState<string | null>(null);
-  const [gateBusy, setGateBusy] = useState(false);
+  const [owner, setOwner] = useState<boolean | undefined>(undefined);
 
   const [rels, setRels] = useState<Relation[]>([]);
   const [charMap, setCharMap] = useState<Map<string, Character>>(new Map());
@@ -47,7 +42,6 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   const [targetId, setTargetId] = useState('');
   const [newLabel, setNewLabel] = useState('');
   const [newNote, setNewNote] = useState('');
-  const [turnstileToken, setTurnstileToken] = useState('');
   const [formError, setFormError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -86,20 +80,17 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
 
   useEffect(() => {
     (async () => {
-      const [got, ok] = await Promise.all([
-        getCharacter(slug, charId),
-        verifyCharToken(slug, charId), // cookie 優先
-      ]);
+      const got = await getCharacter(slug, charId);
       setData(got);
       if (!got) return;
-      if (ok) setToken('cookie');
+      setOwner(got.viewer.owned);
     })();
   }, [slug, charId]);
 
   useEffect(() => {
-    if (token) refresh();
+    if (owner) refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [owner]);
 
   const grouped = useMemo(() => {
     const incoming: Relation[] = [];
@@ -149,26 +140,11 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
     );
   }
 
-  if (!token) {
+  if (owner === false) {
     return (
       <ProjectShell slug={slug} title={data.project.title} active={null}>
         <div className="px-4 sm:px-6 py-16">
-          <TokenGate
-            title={`「${data.character.name}」的牽線管理`}
-            hint="發起與回應牽線需要角色編輯碼（chr_…）。"
-            token={gateToken}
-            setToken={setGateToken}
-            busy={gateBusy}
-            error={gateError}
-            onSubmit={async () => {
-              setGateBusy(true);
-              setGateError(null);
-              const ok = await verifyCharToken(slug, charId, gateToken);
-              setGateBusy(false);
-              if (!ok) return setGateError('企劃不存在或權杖錯誤');
-              setToken('cookie'); // 已種 cookie
-            }}
-          />
+          <LoginPrompt title={`「${data.character.name}」的牽線管理`} hint="這是這隻角色本人專屬的頁面。用建立這隻角色時的同一個 Discord 帳號登入即可管理牽線。" />
         </div>
       </ProjectShell>
     );
@@ -189,16 +165,14 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
     setFormError(null);
     if (!targetId) return setFormError('請選擇對方角色（沒有的話先建草稿）');
     if (!newLabel.trim()) return setFormError('請填「你眼中的 TA」');
-    if (!turnstileToken) return setFormError('請先完成真人驗證');
     setBusy(true);
     try {
-      const res = await initiateRelation(slug, charId, token, targetId, newLabel, newNote, turnstileToken);
+      const res = await initiateRelation(slug, charId, targetId, newLabel, newNote);
       if (!res.ok) return setFormError(res.error);
       setTargetId('');
       setQuery('');
       setNewLabel('');
       setNewNote('');
-      setTurnstileToken('');
       setNotice('已發出牽線，等對方補完後公開。');
       await refresh();
     } finally {
@@ -240,7 +214,7 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
       setRespError((e) => ({ ...e, [id]: '請填「你眼中的 TA」再確認牽成' }));
       return;
     }
-    const res = await respondRelation(slug, charId, token, id, action, respLabel[id] ?? '', respNote[id] ?? '');
+    const res = await respondRelation(slug, charId, id, action, respLabel[id] ?? '', respNote[id] ?? '');
     if (!res.ok) return setRespError((e) => ({ ...e, [id]: res.error }));
     setNotice(action === 'accept' ? '牽線成功！已公開並寫入動態牆。' : '已婉拒，這條紀錄僅雙方可見。');
     await refresh();
@@ -248,7 +222,7 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
 
   const doUpdateSide = async (r: Relation) => {
     const id = r.id;
-    const res = await updateRelationSide(slug, charId, token, id, editLabel[id] ?? '', editNote[id] ?? '');
+    const res = await updateRelationSide(slug, charId, id, editLabel[id] ?? '', editNote[id] ?? '');
     if (!res.ok) return toast(res.error, 'err');
     setEditOpen((o) => ({ ...o, [id]: false }));
     toast('已更新你眼中的 TA');
@@ -256,20 +230,20 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   };
 
   const doAddNote = async (r: Relation, body: string) => {
-    const res = await addRelationNote(slug, charId, token, r.id, body);
+    const res = await addRelationNote(slug, charId, r.id, body);
     if (!res.ok) return toast(res.error, 'err');
     await refresh();
   };
 
   const doDeleteNote = async (r: Relation, noteId: number) => {
-    const res = await deleteRelationNote(slug, charId, token, r.id, noteId);
+    const res = await deleteRelationNote(slug, charId, r.id, noteId);
     if (!res.ok) return toast(res.error, 'err');
     await refresh();
   };
 
   const doUnwire = async (r: Relation) => {
     if (!window.confirm('確定解除這條關係？紀錄會保留但不再公開。')) return;
-    const res = await unwireRelation(slug, charId, token, r.id);
+    const res = await unwireRelation(slug, charId, r.id);
     if (!res.ok) return toast(res.error, 'err');
     setNotice('已解除，紀錄保留（僅雙方可見）。');
     await refresh();
@@ -633,7 +607,6 @@ id="fld-Relations-5"                 className="kg-input"
               </div>
             </div>
 
-            <TurnstileWidget token={turnstileToken} onChange={setTurnstileToken} />
             {formError && <ErrorBox>{formError}</ErrorBox>}
             <button type="button" className="kg-pill kg-pill-red" disabled={busy} onClick={doInitiate}>
               {busy ? '送出中…' : '發出牽線 →'}

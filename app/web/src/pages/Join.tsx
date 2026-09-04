@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { getProject, joinProject, listCharacters } from '../lib/api';
 import { addMyChar } from '../lib/session';
 import { href } from '../lib/nav';
-import { PageLoading, ErrorBox, toast, ImageField, ImeInput, SecLabel, SheetableField, StickySaveBar, TagPicker, TokenReveal, TurnstileWidget, TURNSTILE_REQUIRED, type RosterLite } from '../components/kg';
+import { PageLoading, ErrorBox, toast, ImageField, ImeInput, SecLabel, SheetableField, StickySaveBar, TagPicker, type RosterLite } from '../components/kg';
 import { SocialLinksEditor } from '../components/links';
 import { sanitizeLinks, type SocialLink } from '../lib/links';
 import { ProjectShell } from '../components/project-shell';
@@ -10,32 +10,22 @@ import type { Character, Project } from '../lib/types';
 
 export default function JoinPage({ slug }: { slug: string }) {
   const [project, setProject] = useState<Project | null | undefined>(undefined);
-  const [chars, setChars] = useState<Character[]>([]);
   const [roster, setRoster] = useState<RosterLite[]>([]);
   const [name, setName] = useState('');
   const [oneLiner, setOneLiner] = useState('');
   const [avatarUrl, setAvatarUrl] = useState('');
   const [profile, setProfile] = useState<Record<string, string>>({});
   const [tags, setTags] = useState<string[]>([]);
-  const [claimId, setClaimId] = useState('');
   const [links, setLinks] = useState<SocialLink[]>([]);
   const [joinCode, setJoinCode] = useState('');
-  const [turnstileToken, setTurnstileToken] = useState(TURNSTILE_REQUIRED ? '' : 'dev-bypass');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [created, setCreated] = useState<{ character: Character; charToken: string } | null>(null);
+  const [created, setCreated] = useState<{ character: Character } | null>(null);
 
   useEffect(() => {
     getProject(slug).then((p) => setProject(p ?? null));
     listCharacters(slug).then((cs) => {
-      setChars(cs);
       setRoster(cs.map((c) => ({ id: c.id, name: c.name, avatar_url: c.avatar_url })));
-      const q = new URLSearchParams(window.location.search).get('claim')?.trim();
-      if (q) {
-        setName(q);
-        const hit = cs.find((c) => c.slot && c.name === q);
-        if (hit) setClaimId(hit.id);
-      }
     });
   }, [slug]);
 
@@ -62,7 +52,6 @@ export default function JoinPage({ slug }: { slug: string }) {
       if (f.required && !(profile[f.key] ?? '').trim()) return setError(`「${f.label}」為必填欄位`);
     }
     if (project.join_mode === 'code' && !joinCode.trim()) return setError('此企劃需要加入碼');
-    if (TURNSTILE_REQUIRED && !turnstileToken) return setError('請先完成真人驗證');
     setBusy(true);
     try {
       const res = await joinProject(slug, {
@@ -71,13 +60,10 @@ export default function JoinPage({ slug }: { slug: string }) {
         avatar_url: avatarUrl,
         profile,
         tags,
-        claim_id: claimId || undefined,
         links: sanitizeLinks(links),
         join_code: joinCode,
-        turnstile: turnstileToken,
       });
       if (!res.ok) return setError(res.error);
-      // charToken 只顯示這一次；cookie 已由後端種好（§4.2）
       addMyChar({ slug, projectTitle: project.title, charId: res.character.id, name: res.character.name });
       toast(`「${res.character.name}」已加入企劃`);
       setCreated(res);
@@ -95,18 +81,14 @@ export default function JoinPage({ slug }: { slug: string }) {
             <h1 className="font-display font-black text-4xl mt-2">「{created.character.name}」已加入 {project.title}</h1>
             <p className="font-mono2 text-sm text-[#6f6156] mt-2">公開短碼：{created.character.id}（貼在 Discord 用這個）</p>
           </div>
-          <TokenReveal
-            kind="char"
-            token={created.charToken}
-            note="公開短碼可以公開；編輯碼是祕密。兩者混在一起等於把編輯權公開。"
-          >
+          <div className="kg-card p-6 sm:p-8 kg-rise flex flex-wrap gap-3">
             <a href={href(`/p/${slug}/c/${created.character.id}`)} className="kg-pill">
               前往角色頁 →
             </a>
             <a href={href(`/p/${slug}/c/${created.character.id}/relations`)} className="kg-pill kg-pill-ink">
               開始牽線
             </a>
-          </TokenReveal>
+          </div>
         </div>
       </ProjectShell>
     );
@@ -140,11 +122,7 @@ export default function JoinPage({ slug }: { slug: string }) {
                     id="fld-Join-1"
                     className="kg-input"
                     value={name}
-                    onChange={(v) => {
-                      setName(v);
-                      const hit = chars.find((c) => c.slot && c.name === v.trim());
-                      setClaimId(hit?.id ?? '');
-                    }}
+                    onChange={setName}
                     maxLength={30}
                   />
                 </div>
@@ -155,29 +133,6 @@ export default function JoinPage({ slug }: { slug: string }) {
               </div>
             </div>
           </div>
-
-          {chars.some((c) => c.slot) && (
-            <div className="kg-card-flat p-4 space-y-2">
-              <div className="kg-seclabel">（認領空位）</div>
-              <p className="text-sm text-[#6f6156] leading-relaxed">有人先幫還沒加入的角色留了位子。名字對上就會自動接上已有的牽線。</p>
-              <div className="flex flex-wrap gap-1.5">
-                {chars.filter((c) => c.slot).map((c) => (
-                  <button
-                    key={c.id}
-                    type="button"
-                    className={`kg-pill kg-pill-sm ${claimId === c.id ? 'kg-pill-ink' : 'kg-pill-ghost border !border-[#e8dfd4]'}`}
-                    onClick={() => {
-                      setClaimId(claimId === c.id ? '' : c.id);
-                      if (claimId !== c.id) setName(c.name);
-                    }}
-                  >
-                    {c.name}
-                  </button>
-                ))}
-              </div>
-              {claimId && <p className="font-mono2 text-[11px] text-[#24697f]">將認領空位「{chars.find((c) => c.id === claimId)?.name}」</p>}
-            </div>
-          )}
 
           {(project.tag_groups ?? []).length > 0 && (
             <div className="kg-card-flat p-4">
@@ -221,7 +176,6 @@ export default function JoinPage({ slug }: { slug: string }) {
             </div>
           )}
 
-          <TurnstileWidget token={turnstileToken} onChange={setTurnstileToken} />
           {error && <ErrorBox>{error}</ErrorBox>}
         </div>
       </div>
