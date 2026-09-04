@@ -286,7 +286,7 @@ app.post('/api/p/:slug/c/:charId/relations', async (c) => {
   const input = await parseBody(c, schema.initiateSchema);
   if (!input) return c.json({ error: '參數格式不正確' }, 400);
   if (!(await ts(c, input.turnstile))) return c.json({ error: '人機驗證未通過，請再試一次' }, 403);
-  const r = await relSvc.initiate(d, got.project.id, got.character.id, input.targetId, input.label, input.note, input.extras ?? []);
+  const r = await relSvc.initiate(d, got.project.id, got.character.id, input.targetId, input.label, input.note);
   if ('error' in r) return c.json({ error: r.error }, 400);
   return c.json({ ok: true });
 });
@@ -323,13 +323,25 @@ app.patch('/api/p/:slug/relations/:id/side', async (c) => {
   return c.json({ ok: true });
 });
 
-app.patch('/api/p/:slug/relations/:id/extras', async (c) => {
+// 雙方共用的互動筆記（1.5-1，取代原本的 extras）
+app.post('/api/p/:slug/relations/:id/notes', async (c) => {
   const d = db(c);
-  const input = await parseBody(c, schema.extrasPatchSchema);
+  const input = await parseBody(c, schema.addNoteSchema);
   if (!input) return c.json({ error: '參數格式不正確' }, 400);
   const got = await requireChar(d, c.req.param('slug'), input.charId, cookieOf(c));
   if (!got) return c.json({ error: AUTH_FAIL }, 401);
-  const r = await relSvc.patchExtras(d, got.project.id, Number(c.req.param('id')), got.character.id, input.extras);
+  const r = await relSvc.addNote(d, got.project.id, Number(c.req.param('id')), got.character.id, input.body);
+  if ('error' in r) return c.json({ error: r.error }, 400);
+  return c.json(r);
+});
+
+app.delete('/api/p/:slug/relations/:id/notes/:noteId', async (c) => {
+  const d = db(c);
+  const input = await parseBody(c, schema.deleteNoteSchema);
+  if (!input) return c.json({ error: '參數格式不正確' }, 400);
+  const got = await requireChar(d, c.req.param('slug'), input.charId, cookieOf(c));
+  if (!got) return c.json({ error: AUTH_FAIL }, 401);
+  const r = await relSvc.deleteNote(d, got.project.id, Number(c.req.param('id')), Number(c.req.param('noteId')), got.character.id);
   if ('error' in r) return c.json({ error: r.error }, 400);
   return c.json({ ok: true });
 });

@@ -21,7 +21,6 @@ const worldBlock = z.looseObject({
 });
 const qaItem = z.looseObject({ id: str(64), q: str(500), a: str(8000), tags: z.array(str(40)).max(20).optional() });
 const fieldDef = z.looseObject({ key: str(64), label: str(100) });
-const relationExtra = z.looseObject({ id: str(64), title: str(200), content: str(8000) });
 const profile = z.record(str(64), str(900_000));
 const socialLink = z.looseObject({
   id: str(64),
@@ -101,7 +100,6 @@ export const initiateSchema = z.object({
   targetId: str(64),
   label: str(100),
   note: str(2000),
-  extras: z.array(relationExtra).max(20).optional(),
   turnstile: optStr(900_000),
 });
 
@@ -118,9 +116,8 @@ export const sidePatchSchema = z.object({
   note: str(2000),
 });
 
-export const extrasPatchSchema = z.object({
-  charId: str(64),
-  extras: z.array(relationExtra).max(20),
-});
+export const addNoteSchema = z.object({ charId: str(64), body: str(1000) });
+
+export const deleteNoteSchema = z.object({ charId: str(64) });
 
 export const unwireSchema = z.object({ charId: str(64) });
