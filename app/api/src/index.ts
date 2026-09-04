@@ -350,6 +350,9 @@ app.post('/api/p/:slug/relations/:id/unwire', async (c) => {
 class HeadRewriter {
   constructor(
     private meta: { title: string; description: string; image: string | null },
+    // path routing 上線後（見工單 P2 第一步）沒有任何呼叫端會傳非 null 進來了——
+    // JS 會在同一個網址原地接手，不用再靠這裡轉址；留著這個參數但沒人用，之後若要整個拿掉
+    // 要一併改 servePage() 的三個呼叫點。
     private redirect: string | null,
   ) {}
   element(el: Element) {
@@ -387,11 +390,11 @@ async function servePage(c: Ctx, slug: string, charId?: string) {
   const p = await projectSvc.getProjectRaw(d, slug);
   const site = c.env.PUBLIC_SITE_NAME || '牽關';
 
-  // 不存在或不公開：只給通用 meta，絕不輸出真實標題／封面（§11）
+  // 不存在或不公開：只給通用 meta，絕不輸出真實標題／封面（§11）。
+  // path routing 下不用再轉址——JS 會在同一個網址原地接手，這裡只要把 meta 換成通用版本即可。
   if (!p || p.visibility !== 'public') {
     const res = new HTMLRewriter()
       .on('title', new HeadRewriter({ title: site, description: '多人 OC 牽線企劃', image: null }, null))
-      .on('head', new HeadRewriter({ title: site, description: '', image: null }, `/#/p/${slug}${charId ? `/c/${charId}` : ''}`))
       .on('meta', new HeadRewriter({ title: site, description: '多人 OC 牽線企劃', image: null }, null))
       .transform(asset);
     const r2 = new Response(res.body, res);
@@ -411,10 +414,8 @@ async function servePage(c: Ctx, slug: string, charId?: string) {
     }
   }
   const meta = { title, description, image };
-  const redirect = `/#/p/${slug}${charId ? `/c/${charId}` : ''}`;
   return new HTMLRewriter()
     .on('title', new HeadRewriter(meta, null))
-    .on('head', new HeadRewriter(meta, redirect))
     .on('meta', new HeadRewriter(meta, null))
     .transform(asset);
 }
