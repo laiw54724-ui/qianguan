@@ -422,10 +422,20 @@ async function servePage(c: Ctx, slug: string, charId?: string) {
 app.get('/p/:slug', (c) => servePage(c, c.req.param('slug')));
 app.get('/p/:slug/c/:charId', (c) => servePage(c, c.req.param('slug'), c.req.param('charId')));
 
-// 其餘一律交給靜態資產（SPA）
-app.all('*', (c) => {
+// 其餘一律交給靜態資產；真的存在的檔案（JS/CSS/圖片、favicon…）直接回，
+// 其餘（SPA 路由，例如 /p/xxx/manage——沒有對應的實體檔案）都退回 index.html，
+// 讓前端路由自己讀 window.location.pathname 接手（path routing，不再靠 hash）。
+app.all('*', async (c) => {
   if (c.req.path.startsWith('/api/')) return c.json({ error: AUTH_FAIL }, 404);
-  return c.env.ASSETS.fetch(c.req.raw);
+  const res = await c.env.ASSETS.fetch(c.req.raw);
+  if (res.status !== 404) return res;
+  // 明確拿 /index.html，不是拿 c.req.raw 改個網址重送——
+  // 這條 catch-all 是 app.all('*')，任何方法都會進來，把原始請求（可能是 POST 帶 body）
+  // 原封不動轉去 '/' 會把 method/body 一起帶過去，語意不對且某些 runtime 會直接拋錯。
+  // 也不能信任 ASSETS 對 '/' 的回應狀態碼，這裡是給爬蟲／使用者看的頁面殼，一定要回 200，
+  // 否則爬蟲會判定頁面不存在，OG meta 就白做了。
+  const shell = await c.env.ASSETS.fetch(new URL('/index.html', c.req.url));
+  return new Response(shell.body, { status: 200, headers: shell.headers });
 });
 
 export default app;
