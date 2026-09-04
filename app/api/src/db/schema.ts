@@ -99,6 +99,26 @@ export const relationNotes = sqliteTable(
   (t) => [index('idx_rnotes').on(t.relationId, t.createdAt)],
 );
 
+export const privateRelations = sqliteTable(
+  'private_relations',
+  {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    projectId: text('project_id')
+      .notNull()
+      .references(() => projects.id),
+    ownerCharId: text('owner_char_id')
+      .notNull()
+      .references(() => characters.id),
+    ghostName: text('ghost_name').notNull(),
+    label: text('label').notNull().default(''),
+    note: text('note').notNull().default(''),
+    linkedCharId: text('linked_char_id').references(() => characters.id),
+    createdAt: integer('created_at').notNull(),
+    updatedAt: integer('updated_at').notNull(),
+  },
+  (t) => [index('idx_priv').on(t.ownerCharId)],
+);
+
 export const events = sqliteTable(
   'events',
   {
@@ -120,3 +140,4 @@ export type CharacterRow = typeof characters.$inferSelect;
 export type RelationRow = typeof relations.$inferSelect;
 export type EventRow = typeof events.$inferSelect;
 export type RelationNoteRow = typeof relationNotes.$inferSelect;
+export type PrivateRelationRow = typeof privateRelations.$inferSelect;
