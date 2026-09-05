@@ -116,8 +116,8 @@ app.get('/api/projects/similar', async (c) =>
 
 app.get('/api/auth/discord/login', async (c) => {
   const next = validateNextPath(c.req.query('next'));
-  const stateId = await createState(c.env.OAUTH_STATE, next);
   const redirectUri = new URL('/api/auth/discord/callback', c.req.url).toString();
+  const stateId = await createState(c.env.OAUTH_STATE, next, redirectUri);
   const authUrl = new URL('https://discord.com/api/oauth2/authorize');
   authUrl.searchParams.set('client_id', c.env.DISCORD_CLIENT_ID);
   authUrl.searchParams.set('redirect_uri', redirectUri);
@@ -136,8 +136,9 @@ app.get('/api/auth/discord/callback', async (c) => {
   const code = c.req.query('code');
   if (!code) return c.redirect(stored.next);
 
-  const redirectUri = new URL('/api/auth/discord/callback', c.req.url).toString();
-  const accessToken = await exchangeCode(c.env.DISCORD_CLIENT_ID, c.env.DISCORD_CLIENT_SECRET, code, redirectUri);
+  // redirect_uri 必須跟 /login 那次「逐字元相同」（Discord OAuth2 規定），從 state 讀，
+  // 不要在這裡重新用 new URL(..., c.req.url) 算一次——見 auth/oauthState.ts 的說明。
+  const accessToken = await exchangeCode(c.env.DISCORD_CLIENT_ID, c.env.DISCORD_CLIENT_SECRET, code, stored.redirectUri);
   if (!accessToken) return c.redirect(stored.next);
   const discordId = await fetchDiscordId(accessToken);
   if (!discordId) return c.redirect(stored.next);
