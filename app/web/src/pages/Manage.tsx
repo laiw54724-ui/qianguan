@@ -132,8 +132,23 @@ export default function ManagePage({ slug }: { slug: string }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, title, summary, coverUrl, iconUrl, visibility, joinMode, joinCode, signupsOpen, worldBlocks, qa, fields, tagGroups, links]);
 
-  const doSave = async (): Promise<boolean> => {
-    if (saving) return false;
+  // 存檔進行中若又被叫一次（例如按了「儲存」還沒回來，使用者馬上又點連結想離開，
+  // 離開確認跳出「儲存並離開」）——不能直接回 false 假裝失敗：呼叫端（尤其
+  // useLeaveGuard）會把 false 當成「存檔失敗」，讓使用者卡在「明明按過儲存」
+  // 卻又被說沒存好的狀態。改成把同一個進行中的 Promise 分享給後來的呼叫端，
+  // 讓大家等的都是同一次真正的存檔結果。
+  const savingPromise = useRef<Promise<boolean> | null>(null);
+
+  const doSave = (): Promise<boolean> => {
+    if (savingPromise.current) return savingPromise.current;
+    const p = doSaveInner().finally(() => {
+      savingPromise.current = null;
+    });
+    savingPromise.current = p;
+    return p;
+  };
+
+  const doSaveInner = async (): Promise<boolean> => {
     if (!title.trim()) {
       setError('企劃名稱不能空白');
       return false;

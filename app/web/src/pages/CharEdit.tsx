@@ -122,7 +122,22 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dirty, name, oneLiner, avatarUrl, profile, blocks, links, tags]);
 
-  const doSave = async (): Promise<boolean> => {
+  // 存檔進行中若又被叫一次（例如按了「儲存」還沒回來，使用者馬上又點連結想離開，
+  // 離開確認跳出「儲存並離開」）——這裡原本完全沒擋，會真的送出兩個並發的 PATCH；
+  // 改成把同一個進行中的 Promise 分享給後來的呼叫端，讓大家等的都是同一次真正的
+  // 存檔結果，也不會讓 useLeaveGuard 把「還在存」誤判成「存檔失敗」。
+  const savingPromise = useRef<Promise<boolean> | null>(null);
+
+  const doSave = (): Promise<boolean> => {
+    if (savingPromise.current) return savingPromise.current;
+    const p = doSaveInner().finally(() => {
+      savingPromise.current = null;
+    });
+    savingPromise.current = p;
+    return p;
+  };
+
+  const doSaveInner = async (): Promise<boolean> => {
     if (!data) return false;
     setError(null);
     if (!name.trim()) {
