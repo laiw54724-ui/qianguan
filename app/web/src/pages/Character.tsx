@@ -63,7 +63,7 @@ export default function CharacterPage({ slug, charId }: { slug: string; charId: 
   const { project, character } = data;
 
   return (
-    <ProjectShell slug={slug} title={project.title} active={null}>
+    <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active={null}>
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
         <a href={href(`/p/${slug}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← {project.title}

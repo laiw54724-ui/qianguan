@@ -1,8 +1,9 @@
 // 企劃層共用殼——工單 1-1：/p/:slug/* 底下所有頁面共用同一個頂部＋底部導覽，
 // 建角色、牽線編輯等頁面不再跳出企劃的脈絡。
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { Activity, Settings, User, Users } from 'lucide-react';
 import { href } from '../lib/nav';
+import { SHELL_HEADER_HEIGHT } from './kg';
 
 export type ProjectTab = 'feed' | 'roster' | 'mine' | 'settings' | null;
 
@@ -13,24 +14,64 @@ const TABS: { id: Exclude<ProjectTab, null>; label: string; icon: typeof Activit
   { id: 'settings', label: '設定', icon: Settings, path: (slug) => `/p/${slug}/manage` },
 ];
 
+// Ticket-07：每個用到 ProjectShell 的頁面各自 fetch 自己的 project，在資料回來前一律傳
+// title=""——切換企劃內分頁（動態／名單／我的／設定）時，即使上一頁才剛拿到同一份
+// project 資料，頁首還是會先閃回空字串的預設值，才又跳回正確標題／頭像。用 slug 記住
+// 上一次拿到的 title／iconUrl，資料還沒回來前先顯示這份快取，不用等每個頁面重新 fetch。
+const shellCache = new Map<string, { title: string; iconUrl: string | null }>();
+
 export function ProjectShell({
   slug,
   title,
+  iconUrl,
   active,
   children,
 }: {
   slug: string;
   title: string;
+  iconUrl?: string | null;
   active: ProjectTab;
   children: ReactNode;
 }) {
+  if (title) shellCache.set(slug, { title, iconUrl: iconUrl ?? null });
+  const cached = shellCache.get(slug);
+  const displayTitle = title || cached?.title || '牽關';
+  const displayIcon = title ? (iconUrl ?? null) : (cached?.iconUrl ?? null);
+  const letter = Array.from(displayTitle)[0] ?? '?';
+  // Ticket-05：頁首是 position: sticky，在正常文件流裡仍佔一份高度——但瀏覽器原生的
+  // 「捲到某元素」行為（focus 一個欄位時、手機鍵盤彈出讓可視區域重排、或網址帶 #hash）
+  // 只看文件流位置，不知道頁首視覺上疊在最上面那一段。結果是目標元素捲到 y=0 就被
+  // 頁首蓋住一截。scroll-padding-top 讓這些原生捲動行為自動多留頁首的高度，不用逐一
+  // 幫每個可能的錨點加 scroll-margin-top。只在企劃殼掛著的期間套用，離開時還原。
+  useEffect(() => {
+    const root = document.documentElement;
+    const prev = root.style.scrollPaddingTop;
+    root.style.scrollPaddingTop = `${SHELL_HEADER_HEIGHT}px`;
+    return () => {
+      root.style.scrollPaddingTop = prev;
+    };
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="sticky top-0 z-40 border-b-2 border-[#e8dfd4] bg-[#fbf8f3]/95 backdrop-blur-sm">
         <div className="mx-auto max-w-5xl px-4 sm:px-6 h-14 flex items-center">
           <a href={href(`/p/${slug}`)} className="flex items-center gap-2 min-w-0 group">
-            <img src="/logo-mark.svg" alt="" className="w-6 h-6 shrink-0 group-hover:scale-110 transition-transform" />
-            <span className="font-logo text-lg truncate group-hover:text-[#9e4b2c] transition-colors">{title || '牽關'}</span>
+            {displayIcon ? (
+              <img
+                src={displayIcon}
+                alt=""
+                className="w-6 h-6 rounded-full object-cover shrink-0 group-hover:scale-110 transition-transform"
+              />
+            ) : (
+              <span
+                aria-hidden="true"
+                className="w-6 h-6 rounded-full shrink-0 flex items-center justify-center text-[11px] font-bold text-white bg-[#9e4b2c] group-hover:scale-110 transition-transform"
+              >
+                {letter}
+              </span>
+            )}
+            <span className="font-logo text-lg truncate group-hover:text-[#9e4b2c] transition-colors">{displayTitle}</span>
           </a>
         </div>
       </header>

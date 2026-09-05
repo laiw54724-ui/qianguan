@@ -169,7 +169,7 @@ export default function ProjectPage({ slug }: { slug: string }) {
   }
 
   return (
-    <ProjectShell slug={slug} title={project.title} active="feed">
+    <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active="feed">
       <div className="mx-auto max-w-5xl px-4 sm:px-6 w-full flex-1">
         {/* 簡介 hero */}
         <section id="intro" className="scroll-mt-24 pt-10 kg-rise">

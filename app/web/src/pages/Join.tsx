@@ -74,7 +74,7 @@ export default function JoinPage({ slug }: { slug: string }) {
 
   if (created) {
     return (
-      <ProjectShell slug={slug} title={project.title} active={null}>
+      <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active={null}>
         <div className="mx-auto max-w-xl px-4 sm:px-6 py-16 w-full">
           <div className="mb-6">
             <SecLabel>歡迎登船</SecLabel>
@@ -95,7 +95,7 @@ export default function JoinPage({ slug }: { slug: string }) {
   }
 
   return (
-    <ProjectShell slug={slug} title={project.title} active={null}>
+    <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active={null}>
       <div className="kg-form-page mx-auto max-w-2xl px-4 sm:px-6 py-14 w-full">
         <SecLabel>加入企劃</SecLabel>
         <h1 className="font-display font-black text-4xl mt-2 mb-2">

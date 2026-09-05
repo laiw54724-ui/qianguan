@@ -228,7 +228,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
 
   if (owner === false) {
     return (
-      <ProjectShell slug={slug} title={data.project.title} active={null}>
+      <ProjectShell slug={slug} title={data.project.title} iconUrl={data.project.icon_url} active={null}>
         <div className="px-4 sm:px-6 py-16">
           <LoginPrompt title={`編輯「${data.character.name}」`} hint="這是這隻角色本人專屬的頁面。用建立這隻角色時的同一個 Discord 帳號登入即可編輯。" />
         </div>
@@ -239,7 +239,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
   const { project } = data;
 
   return (
-    <ProjectShell slug={slug} title={project.title} active={null}>
+    <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active={null}>
       <div className="kg-form-page mx-auto max-w-2xl px-4 sm:px-6 py-10 w-full">
         <a href={href(`/p/${slug}/c/${charId}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← 回角色頁

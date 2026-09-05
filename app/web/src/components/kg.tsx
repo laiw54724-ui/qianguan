@@ -489,6 +489,7 @@ export function useKeyboardInset() {
 // 這裡用 calc() 一起算，鍵盤彈出時 useKeyboardInset 的 inset 再疊上去。
 export const SHELL_NAV_HEIGHT = 60; // 對應 project-shell.tsx 的 min-h-[56px] 項目 + 一點邊距
 export const SAVEBAR_HEIGHT = 64; // .kg-savebar 的實際高度估值，給疊更上層的元件（如分享提示）算位置用
+export const SHELL_HEADER_HEIGHT = 58; // 對應 project-shell.tsx 頂部 header 的 h-14（56px）+ border-b-2（2px）——Ticket-05 用來補 scroll-padding-top
 
 export function StickySaveBar({
   dirty,

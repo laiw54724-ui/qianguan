@@ -142,7 +142,7 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
 
   if (owner === false) {
     return (
-      <ProjectShell slug={slug} title={data.project.title} active={null}>
+      <ProjectShell slug={slug} title={data.project.title} iconUrl={data.project.icon_url} active={null}>
         <div className="px-4 sm:px-6 py-16">
           <LoginPrompt title={`「${data.character.name}」的牽線管理`} hint="這是這隻角色本人專屬的頁面。用建立這隻角色時的同一個 Discord 帳號登入即可管理牽線。" />
         </div>
@@ -252,7 +252,7 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   const target = targetId ? charMap.get(targetId) : undefined;
 
   return (
-    <ProjectShell slug={slug} title={data.project.title} active={null}>
+    <ProjectShell slug={slug} title={data.project.title} iconUrl={data.project.icon_url} active={null}>
       <div className="mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
         <a href={href(`/p/${slug}/c/${charId}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← 回角色頁

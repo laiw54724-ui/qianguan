@@ -230,7 +230,7 @@ export default function ManagePage({ slug }: { slug: string }) {
 
   if (owner === false) {
     return (
-      <ProjectShell slug={slug} title={project.title} active="settings">
+      <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active="settings">
         <div className="px-4 sm:px-6 py-16">
           <LoginPrompt title="開設者後台" hint="這是「開設者」專屬的頁面。用開這個企劃時的同一個 Discord 帳號登入即可進入。" />
         </div>
@@ -239,14 +239,14 @@ export default function ManagePage({ slug }: { slug: string }) {
   }
   if (owner === undefined) {
     return (
-      <ProjectShell slug={slug} title={project.title} active="settings">
+      <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active="settings">
         <PageLoading text="正在打開開設者後台…" />
       </ProjectShell>
     );
   }
 
   return (
-    <ProjectShell slug={slug} title={project.title} active="settings">
+    <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active="settings">
       <div className="kg-form-page mx-auto max-w-3xl px-4 sm:px-6 py-12 w-full">
         <a href={href(`/p/${slug}`)} className="font-mono2 text-xs text-[#6f6156] hover:text-[#9e4b2c]">
           ← 回企劃頁

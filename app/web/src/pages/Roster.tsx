@@ -48,7 +48,7 @@ export default function RosterPage({ slug }: { slug: string }) {
   }
 
   return (
-    <ProjectShell slug={slug} title={project.title} active="roster">
+    <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active="roster">
       <div className="mx-auto max-w-5xl px-4 sm:px-6 pt-8">
         <h1 className="font-huninn text-2xl mb-5">{project.title} ／ 名單</h1>
         <FilterChips groups={project.tag_groups} tags={vocab} value={filterTag} onChange={setFilterTag} />

@@ -39,7 +39,7 @@ export default function MinePage({ slug }: { slug: string }) {
   }
 
   return (
-    <ProjectShell slug={slug} title={project.title} active="mine">
+    <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active="mine">
       <div className="mx-auto max-w-5xl px-4 sm:px-6 pt-8">
         <h1 className="font-huninn text-2xl mb-5">{project.title} ／ 我的角色</h1>
         {mine.length === 0 ? (
