@@ -28,16 +28,28 @@ async function req<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (res.status === 401 && !path.startsWith('/me')) {
-    redirectToLogin();
+    // 後端對「根本沒登入」跟「登入了但不是這個資源的人」回的都是同一個 401——
+    // 這裡不能看到 401 就直接導去登入，那樣任何背景／附帶的請求（例如首頁「我的角色」
+    // 清單裡一筆早就不是自己的角色）只要 403 出來，就會把人強制導去 Discord 登入，
+    // 而且登入完還是同一個帳號、還是不是那個角色的人，會直接無限迴圈（Ticket-01 實測
+    // 抓到的真正成因）。先問一次 /api/me 目前真的有沒有 session，是「真的沒登入」才導去
+    // 登入頁；已經登入的話代表這只是這一個資源不是自己的，讓原本的 throw/catch 正常處理
+    // 就好，不要跳頁。fire-and-forget：不擋住這次請求原本該丟的錯誤。
+    void redirectToLoginIfNoSession();
   }
   const data = (await res.json().catch(() => ({}))) as Record<string, unknown>;
   if (!res.ok) throw new ApiError(res.status, (data.error as string) || AUTH_FAIL);
   return data as T;
 }
 
-/** 401 一律導去登入，帶回目前路徑；`/me`／`/me/dashboard` 自己已經用 null 身分處理未登入，不用被攔截，
- * 否則首次載入頁面時 SiteHeader/Dashboard 探測登入狀態的呼叫會被立刻導去登入頁，形成迴圈。 */
-function redirectToLogin() {
+async function redirectToLoginIfNoSession() {
+  try {
+    const check = await fetch(BASE + '/me', { credentials: 'same-origin' });
+    const me = (await check.json().catch(() => ({}))) as { discordId?: string | null };
+    if (me.discordId) return; // 已經登入，這個 401 是權限問題不是登入問題，交給呼叫端自己的錯誤處理
+  } catch {
+    // 查不到 session 狀態，寧可當作真的沒登入，導去登入頁
+  }
   const next = encodeURIComponent(window.location.pathname + window.location.search);
   window.location.href = `/api/auth/discord/login?next=${next}`;
 }
