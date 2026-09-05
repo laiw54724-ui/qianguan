@@ -58,10 +58,13 @@ export async function securityHeaders(c: Context, next: Next) {
   headers.set('X-Frame-Options', 'DENY');
   headers.set('Strict-Transport-Security', 'max-age=63072000; includeSubDomains');
   // script-src 不放 'unsafe-inline'：OG 頁的跳轉用 <meta refresh> 而非 inline script
-  // frame-src 含 youtube.com／drive.google.com：對應前端 videoEmbedUrl() 的嵌入白名單，兩邊要一致
+  // frame-src 含 youtube.com／drive.google.com／open.spotify.com：對應前端 videoEmbedUrl()／
+  // spotifyEmbedUrl() 的嵌入白名單，兩邊要一致。這裡跟 app/web/public/_headers 是兩份獨立設定——
+  // 大多數頁面（非 /api/* 、非 /p/:slug 的 OG 路由）是靜態資產層直接送出，不會經過這個 middleware，
+  // 讀的是 _headers；改這裡務必連 _headers 一起改，Ticket-03 就是漏改 _headers 才一直卡著。
   headers.set(
     'Content-Security-Policy',
-    "default-src 'self'; img-src 'self' data: https:; media-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; frame-src https://www.youtube.com https://drive.google.com; connect-src 'self'",
+    "default-src 'self'; img-src 'self' data: https:; media-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; frame-src https://www.youtube.com https://drive.google.com https://open.spotify.com; connect-src 'self'",
   );
   c.res = new Response(res.body, { status: res.status, statusText: res.statusText, headers });
 }

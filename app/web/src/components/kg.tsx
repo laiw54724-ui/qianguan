@@ -2568,7 +2568,7 @@ export function MediaInput({ kind, value, onChange }: { kind: 'audio' | 'video';
         <MediaView kind={kind} value={value} />
       ) : (
         <div className="flex gap-2">
-          <input className="kg-input font-mono2 text-xs flex-1 min-w-0" placeholder={`或貼上${label}網址 https://…`} value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <input className="kg-input font-mono2 text-xs flex-1 min-w-0" placeholder={kind === 'audio' ? '或貼上 Spotify／音檔網址 https://…' : `或貼上${label}網址 https://…`} value={draft} onChange={(e) => setDraft(e.target.value)} />
           <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm shrink-0" disabled={!draft.trim()} onClick={() => onChange(draft.trim())}>
             加入
           </button>
@@ -2629,9 +2629,39 @@ export function videoEmbedUrl(v: string): string | null {
   return null;
 }
 
+// 音樂連結轉 Spotify 嵌入網址，轉不了就回傳 null 走 <audio> 直連（上傳的檔案／原始音檔網址）。
+// Spotify 網址形如 https://open.spotify.com/track/<id>?si=...，嵌入版把 /track/ 換成 /embed/track/
+// 並拿掉查詢參數（si 是分享追蹤碼，嵌入不需要）。track/album/playlist/episode/show 都吃同一種轉法。
+export function spotifyEmbedUrl(v: string): string | null {
+  try {
+    const u = new URL(v);
+    const host = u.hostname.replace(/^open\./, '');
+    if (host !== 'spotify.com') return null;
+    const m = u.pathname.match(/^\/(track|album|playlist|episode|show)\/([A-Za-z0-9]+)/);
+    return m ? `https://open.spotify.com/embed/${m[1]}/${m[2]}` : null;
+  } catch {
+    return null;
+  }
+}
+
 export function MediaView({ kind, value }: { kind: 'audio' | 'video'; value: string }) {
   if (!value) return null;
   if (kind === 'audio') {
+    const spotify = spotifyEmbedUrl(value);
+    if (spotify) {
+      return (
+        <iframe
+          src={spotify}
+          title="Spotify 播放器"
+          className="w-full rounded-xl"
+          style={{ height: 152 }}
+          sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+          referrerPolicy="strict-origin-when-cross-origin"
+          allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture"
+          loading="lazy"
+        />
+      );
+    }
     return <audio controls src={value} className="w-full" />;
   }
   const embed = videoEmbedUrl(value);

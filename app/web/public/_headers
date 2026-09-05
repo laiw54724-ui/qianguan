@@ -1,7 +1,9 @@
 # Cloudflare Workers Static Assets 的標頭檔（§6.5 安全標頭）
 # Worker 只處理 /api/* 與 OG 路由；命中的靜態檔直接由 assets 層送出，標頭在這裡配。
+# 跟 app/api/src/middleware/security.ts 的 CSP 是兩份獨立設定，改一邊要記得改另一邊——
+# Ticket-03（YouTube／Spotify 嵌入被擋）就是只改了 middleware 那邊、漏了這裡才一直沒修好。
 /*
   X-Content-Type-Options: nosniff
   Referrer-Policy: strict-origin-when-cross-origin
   X-Frame-Options: DENY
-  Content-Security-Policy: default-src 'self'; img-src 'self' data: https:; media-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self' https://challenges.cloudflare.com; frame-src https://challenges.cloudflare.com; connect-src 'self' https://challenges.cloudflare.com
+  Content-Security-Policy: default-src 'self'; img-src 'self' data: https:; media-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; script-src 'self'; frame-src https://www.youtube.com https://drive.google.com https://open.spotify.com; connect-src 'self'
