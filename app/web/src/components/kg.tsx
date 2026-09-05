@@ -511,8 +511,14 @@ export function StickySaveBar({
   const bottom = inShell && inset === 0
     ? `calc(${SHELL_NAV_HEIGHT}px + env(safe-area-inset-bottom))`
     : inset;
+  // Ticket-08：沒有未儲存變更時把儲存列收起來，不要跟企劃殼的底部導覽一起常駐佔用小螢幕的空間；
+  // 用 transform 滑出去而不是直接 unmount，避免使用者打字時儲存列一直裝上拆下地閃爍。
+  // inShell 時這個列本來就墊高 SHELL_NAV_HEIGHT 讓在底部導覽之上——收起來要蓋掉這份墊高
+  // 一起歸零，translateY(100%) 才會是相對「真正貼齊螢幕下緣」算，不然只會滑到剛好卡在
+  // 底部導覽的高度、還是有一截留在畫面裡。
+  const hidden = !dirty && !busy;
   return (
-    <div className="kg-savebar" style={{ bottom }}>
+    <div className={`kg-savebar${hidden ? ' kg-savebar-hidden' : ''}`} style={{ bottom: hidden ? 0 : bottom }} aria-hidden={hidden}>
       <div className="mx-auto max-w-2xl flex items-center gap-3">
         <span className={`font-mono2 text-xs ${dirty ? 'text-[#9e4b2c]' : 'text-[#6f6156]'}`}>
           {busy ? '處理中…' : left}

@@ -441,6 +441,13 @@
     -webkit-backdrop-filter: blur(10px);
     padding: 10px 16px;
     padding-bottom: max(10px, env(safe-area-inset-bottom));
+    transform: translateY(0);
+    transition: transform 0.2s ease;
+  }
+  /* Ticket-08：沒有未儲存變更時滑出畫面，不要常駐佔用小螢幕空間 */
+  .kg-savebar-hidden {
+    transform: translateY(100%);
+    pointer-events: none;
   }
 
   .kg-seg {
