@@ -69,6 +69,28 @@ describe('shareCharUpdate（1-3 存檔後才問的分享）', () => {
   });
 });
 
+describe('joinProject 加入當下就是最終狀態（Ticket-11，取代原本的 draft→首次儲存才 active）', () => {
+  it('加入當下 status 就是 active，不用等第一次存檔', async () => {
+    const joined = await char.joinProject(db, slug, `d_${crypto.randomUUID().slice(0, 8)}`, { name: '新加入角色' });
+    if (!('ok' in joined)) throw new Error('joinProject failed');
+    expect(joined.character.status).toBe('active');
+  });
+
+  it('加入當下就寫一筆 char_joined 動態，不用等 patchChar', async () => {
+    const before = await eventsFor('char_joined');
+    await char.joinProject(db, slug, `d_${crypto.randomUUID().slice(0, 8)}`, { name: '新加入角色2' });
+    const after = await eventsFor('char_joined');
+    expect(after.length).toBe(before.length + 1);
+  });
+
+  it('加入當下就出現在公開名單（listChars 只回 active）', async () => {
+    const joined = await char.joinProject(db, slug, `d_${crypto.randomUUID().slice(0, 8)}`, { name: '新加入角色3' });
+    if (!('ok' in joined)) throw new Error('joinProject failed');
+    const rows = await char.listChars(db, projectId);
+    expect(rows.some((c) => c.id === joined.character.id)).toBe(true);
+  });
+});
+
 describe('joinProject 角色數量上限（同一 discord_id 最多 20 隻）', () => {
   it('第 21 隻角色被拒絕，前 20 隻不受影響', async () => {
     const discordId = `d_${crypto.randomUUID().slice(0, 8)}`;

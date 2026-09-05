@@ -1,7 +1,9 @@
 // services/character.ts — 移植 store.ts 的角色相關函式。
 // 角色的 id 就是公開短碼 XXXX-XXXX（CSPRNG，§4.1）。
-// §12：新建角色 status='draft'，首次儲存才轉 active 並寫 char_joined 動態。
-// 多筆寫入（首次儲存啟用＋動態、更新＋動態）一律 db.batch()，同一個交易。
+// Ticket-11：加入當下就是最終狀態——status='active'，立刻寫 char_joined 動態、立刻出現在
+// 名單。原本 §12 的「新建角色 status='draft'，首次儲存才轉 active」設計已經拿掉；
+// `status` 欄位仍保留 'draft' 這個值只是為了相容任何舊資料，新建流程不會再產生它。
+// 多筆寫入（加入＋動態、更新＋動態）一律 db.batch()，同一個交易。
 
 import { and, eq, ne } from 'drizzle-orm';
 import type { DrizzleD1Database } from 'drizzle-orm/d1';
@@ -53,7 +55,7 @@ export async function getChar(db: DB, slug: string, charId: string) {
   return { project: p, character: c };
 }
 
-// ---- 加入企劃（建 draft 角色；首次儲存才公開）----
+// ---- 加入企劃（Ticket-11：加入當下就是最終狀態，立刻公開）----
 
 const MAX_CHARS_PER_OWNER = 20;
 
@@ -83,21 +85,27 @@ export async function joinProject(
 
   const id = await genCharIdUnique(db);
   const now = Date.now();
-  await db.insert(characters).values({
-    id,
-    projectId: p.id,
-    name,
-    oneLiner: (input.one_liner ?? '').trim(),
-    avatarUrl: input.avatar_url || null,
-    profile: input.profile ?? {},
-    blocks: input.blocks ?? [],
-    links: sanitizeLinks(input.links),
-    tags: sanitizeTags(input.tags),
-    status: 'draft',
-    discordId,
-    createdAt: now,
-    updatedAt: now,
-  });
+  await db.batch([
+    db.insert(characters).values({
+      id,
+      projectId: p.id,
+      name,
+      oneLiner: (input.one_liner ?? '').trim(),
+      avatarUrl: input.avatar_url || null,
+      profile: input.profile ?? {},
+      blocks: input.blocks ?? [],
+      links: sanitizeLinks(input.links),
+      tags: sanitizeTags(input.tags),
+      status: 'active',
+      discordId,
+      createdAt: now,
+      updatedAt: now,
+    }),
+    db.insert(events).values({
+      projectId: p.id, type: 'char_joined', actorId: id, targetId: null,
+      payload: { name }, createdAt: now,
+    }),
+  ]);
   const c = (await getCharRaw(db, p.id, id))!;
   return { ok: true, character: toChar(c) };
 }
@@ -110,7 +118,8 @@ export async function listChars(db: DB, projectId: string) {
   return rows.sort((a, b) => a.name.localeCompare(b.name, 'zh-Hant')).map(toChar);
 }
 
-// ---- 更新（首次儲存＝啟用＋char_joined；之後＝char_updated；都要 batch）----
+// ---- 更新（Ticket-11 之後 joinProject() 已經直接是 active，這裡的 draft→active
+// 轉換只是保留給任何舊資料相容，新建角色不會再走到這個分支；都要 batch）----
 
 export async function patchChar(
   db: DB,

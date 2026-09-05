@@ -157,7 +157,6 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
       }
     }
     setBusy(true);
-    const wasDraft = data.character.status === 'draft'; // 存檔前先記，存檔後 data 就變了
     try {
       const res = await updateCharacter(slug, charId, {
         name: name.trim(),
@@ -181,9 +180,9 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
       toast('✓ 已儲存，角色頁現在是新內容');
       const got = await getCharacter(slug, charId);
       if (got) setData(got);
-      // 1-3：「加入了」這次存檔已經自動公開過一次，不用再問；
-      // 之後的每次存檔才問要不要順便說一聲，預設不問就是不發。
-      if (!wasDraft) setSharePrompt(true);
+      // 1-3／Ticket-11：加入當下就已經自動發過 char_joined，不用再問；
+      // 「加入」跟「存檔」現在是兩個獨立時刻，每次存檔都問要不要順便說一聲，預設不問就是不發。
+      setSharePrompt(true);
       return true;
     } catch (ex) {
       setError(ex instanceof Error ? ex.message : '儲存失敗，請稍後再試');
