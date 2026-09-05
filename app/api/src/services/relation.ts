@@ -80,6 +80,10 @@ export async function initiate(
   const initiator: 'a' | 'b' = fromId === aId ? 'a' : 'b';
   const now = Date.now();
 
+  // Ticket-10：兩隻角色是同一個 discord_id 的（自己跟自己另一隻角色牽線），不用等自己回應自己，
+  // 直接進 accepted、跟 respond() 的 accept 分支一樣補一筆 relation_accepted 動態，維持動態牆一致。
+  const sameOwner = !!from.discordId && from.discordId === to.discordId;
+
   const existing = await db.select().from(relations)
     .where(and(eq(relations.aId, aId), eq(relations.bId, bId))).limit(1);
 
@@ -87,23 +91,33 @@ export async function initiate(
     const r = existing[0];
     if (r.status === 'accepted') return { error: '已經牽線了' };
     if (r.status === 'pending') return { error: '已有等待回應的邀請' };
-    // declined → 再邀請：更新同一列回 pending，重置雙方欄位
-    await db.update(relations)
-      .set({
-        status: 'pending',
-        initiator,
-        aLabel: initiator === 'a' ? label : '',
-        aNote: initiator === 'a' ? note : '',
-        bLabel: initiator === 'b' ? label : '',
-        bNote: initiator === 'b' ? note : '',
-        updatedAt: now,
-      })
-      .where(eq(relations.id, r.id));
+    // declined → 再邀請：更新同一列回 pending（或自有角色時直接 accepted），重置雙方欄位
+    const set = {
+      status: sameOwner ? 'accepted' : 'pending',
+      initiator,
+      aLabel: initiator === 'a' ? label : '',
+      aNote: initiator === 'a' ? note : '',
+      bLabel: initiator === 'b' ? label : '',
+      bNote: initiator === 'b' ? note : '',
+      updatedAt: now,
+    } as const;
+    const updateStmt = db.update(relations).set(set).where(eq(relations.id, r.id)).returning();
+    if (sameOwner) {
+      await db.batch([
+        updateStmt,
+        db.insert(events).values({
+          projectId, type: 'relation_accepted', actorId: aId, targetId: bId,
+          payload: { a: from.id === aId ? from.name : to.name, b: from.id === aId ? to.name : from.name }, createdAt: now,
+        }).returning(),
+      ]);
+    } else {
+      await updateStmt;
+    }
     const updated = (await getRelRaw(db, projectId, r.id))!;
     return { ok: true, relation: toRel(updated) };
   }
 
-  const inserted = await db.insert(relations).values({
+  const values = {
     projectId,
     aId,
     bId,
@@ -111,11 +125,24 @@ export async function initiate(
     aNote: initiator === 'a' ? note : '',
     bLabel: initiator === 'b' ? label : '',
     bNote: initiator === 'b' ? note : '',
-    status: 'pending',
+    status: sameOwner ? 'accepted' : 'pending',
     initiator,
     createdAt: now,
     updatedAt: now,
-  }).returning();
+  } as const;
+
+  if (sameOwner) {
+    const [insertedRows] = await db.batch([
+      db.insert(relations).values(values).returning(),
+      db.insert(events).values({
+        projectId, type: 'relation_accepted', actorId: aId, targetId: bId,
+        payload: { a: from.id === aId ? from.name : to.name, b: from.id === aId ? to.name : from.name }, createdAt: now,
+      }).returning(),
+    ]);
+    return { ok: true, relation: toRel(insertedRows[0]) };
+  }
+
+  const inserted = await db.insert(relations).values(values).returning();
   return { ok: true, relation: toRel(inserted[0]) };
 }
 

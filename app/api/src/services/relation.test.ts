@@ -1,7 +1,8 @@
 import { env } from 'cloudflare:test';
 import { drizzle } from 'drizzle-orm/d1';
+import { eq } from 'drizzle-orm';
 import { beforeEach, describe, expect, it } from 'vitest';
-import { characters, projects } from '../db/schema';
+import { characters, events, projects } from '../db/schema';
 import * as rel from './relation';
 
 const db = drizzle(env.DB);
@@ -65,6 +66,33 @@ describe('addNote / deleteNote（relation_notes 取代 extras）', () => {
     expect('error' in wrongDelete).toBe(true);
     const rightDelete = await rel.deleteNote(db, projectId, relId, added.note.id, aId);
     expect('ok' in rightDelete && rightDelete.ok).toBe(true);
+  });
+});
+
+describe('自有角色互相牽線自動通過（Ticket-10）', () => {
+  it('同一個 discord_id 的兩隻角色互相發起，直接 accepted，不經過 pending', async () => {
+    const owner = `d_${crypto.randomUUID().slice(0, 8)}`;
+    const now = Date.now();
+    const c1 = `chr_own_a_${crypto.randomUUID().slice(0, 8)}`;
+    const c2 = `chr_own_b_${crypto.randomUUID().slice(0, 8)}`;
+    await db.insert(characters).values([
+      { id: c1, projectId, name: '自有角色A', status: 'active', discordId: owner, createdAt: now, updatedAt: now },
+      { id: c2, projectId, name: '自有角色B', status: 'active', discordId: owner, createdAt: now, updatedAt: now },
+    ]);
+    const r = await rel.initiate(db, projectId, c1, c2, '雙人組', '自己人');
+    if (!('ok' in r)) throw new Error('initiate failed');
+    expect(r.relation.status).toBe('accepted');
+
+    // 動態牆也要跟 respond() accept 一樣寫 relation_accepted，不能因為跳過 pending 就漏掉這個副作用
+    const feedRows = await db.select().from(events).where(eq(events.projectId, projectId));
+    expect(feedRows.some((e) => e.type === 'relation_accepted')).toBe(true);
+  });
+
+  it('不同 discord_id 的角色互相發起，維持原本的 pending 流程', async () => {
+    await acceptRelation();
+    const r = await rel.initiate(db, projectId, aId, bId, 'x', 'y');
+    // acceptRelation() 已經牽成過，這裡驗證沒被 Ticket-10 的判斷誤觸發跳過既有的「已經牽線了」檢查
+    expect('error' in r).toBe(true);
   });
 });
 
