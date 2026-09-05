@@ -264,6 +264,16 @@ export async function createPrivateRelation(
   return tryReq('POST', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/private-relations`, { ghostName, label, note });
 }
 
+export async function updatePrivateRelation(
+  slug: string,
+  charId: string,
+  id: number,
+  label: string,
+  note: string,
+): Promise<Result> {
+  return tryReq('PATCH', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/private-relations/${id}`, { label, note });
+}
+
 export async function deletePrivateRelation(slug: string, charId: string, id: number): Promise<Result> {
   return tryReq('DELETE', `/p/${encodeURIComponent(slug)}/c/${encodeURIComponent(charId)}/private-relations/${id}`);
 }

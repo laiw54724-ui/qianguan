@@ -13,6 +13,7 @@ import {
   respondRelation,
   sideOf,
   unwireRelation,
+  updatePrivateRelation,
   updateRelationSide,
 } from '../lib/api';
 import { href } from '../lib/nav';
@@ -48,7 +49,15 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
   // 私人紀錄（對方還沒加入，或還沒對上真人，1.5-2）
   const [privRels, setPrivRels] = useState<PrivateRelation[]>([]);
   const [ghostName, setGhostName] = useState('');
+  const [ghostLabel, setGhostLabel] = useState('');
+  const [ghostNote, setGhostNote] = useState('');
   const [ghostBusy, setGhostBusy] = useState(false);
+
+  // 私人紀錄的編輯（逐條，Ticket-14：既有紀錄的 label/note 也要能改）
+  const [ghostEditOpen, setGhostEditOpen] = useState<Record<number, boolean>>({});
+  const [ghostEditLabel, setGhostEditLabel] = useState<Record<number, string>>({});
+  const [ghostEditNote, setGhostEditNote] = useState<Record<number, string>>({});
+  const [ghostEditBusy, setGhostEditBusy] = useState<Record<number, boolean>>({});
 
   // 回應表單（逐條）
   const [respLabel, setRespLabel] = useState<Record<number, string>>({});
@@ -185,9 +194,11 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
     if (!ghostName.trim()) return setFormError('請填對方的名字');
     setGhostBusy(true);
     try {
-      const res = await createPrivateRelation(slug, charId, ghostName, '', '');
+      const res = await createPrivateRelation(slug, charId, ghostName, ghostLabel, ghostNote);
       if (!res.ok) return setFormError(res.error);
       setGhostName('');
+      setGhostLabel('');
+      setGhostNote('');
       await refresh();
     } finally {
       setGhostBusy(false);
@@ -198,6 +209,24 @@ export default function RelationsPage({ slug, charId }: { slug: string; charId: 
     const res = await deletePrivateRelation(slug, charId, id);
     if (!res.ok) return toast(res.error, 'err');
     await refresh();
+  };
+
+  const openGhostEdit = (p: PrivateRelation) => {
+    setGhostEditOpen((o) => ({ ...o, [p.id]: !o[p.id] }));
+    setGhostEditLabel((l) => ({ ...l, [p.id]: p.label }));
+    setGhostEditNote((n) => ({ ...n, [p.id]: p.note }));
+  };
+
+  const doEditGhost = async (id: number) => {
+    setGhostEditBusy((b) => ({ ...b, [id]: true }));
+    try {
+      const res = await updatePrivateRelation(slug, charId, id, ghostEditLabel[id] ?? '', ghostEditNote[id] ?? '');
+      if (!res.ok) return toast(res.error, 'err');
+      setGhostEditOpen((o) => ({ ...o, [id]: false }));
+      await refresh();
+    } finally {
+      setGhostEditBusy((b) => ({ ...b, [id]: false }));
+    }
   };
 
   const doPromoteGhost = async (id: number) => {
@@ -560,28 +589,79 @@ id="fld-Relations-5"                 className="kg-input"
                   {ghostBusy ? '記錄中…' : '記下對方名字'}
                 </button>
               </div>
+              <div className="grid sm:grid-cols-2 gap-2 mt-2">
+                <input
+                  className="kg-input"
+                  value={ghostLabel}
+                  onChange={(e) => setGhostLabel(e.target.value)}
+                  placeholder="你們的關係（例：師徒）"
+                  maxLength={40}
+                />
+                <input
+                  className="kg-input"
+                  value={ghostNote}
+                  onChange={(e) => setGhostNote(e.target.value)}
+                  placeholder="互動筆記，只有你看得到"
+                  maxLength={2000}
+                />
+              </div>
               {privRels.length > 0 && (
                 <div className="mt-3 space-y-2">
                   {privRels.map((p) => (
-                    <div key={p.id} className="kg-card-flat p-3 flex items-center justify-between gap-3 bg-white">
-                      <div>
-                        <b className="text-sm">{p.ghost_name}</b>
-                        {p.suggested_char_id && (
-                          <span className="text-xs text-[#6f6156] ml-2">
-                            站上有同名角色，要送出正式邀請嗎？
-                          </span>
-                        )}
-                      </div>
-                      <div className="flex gap-2 shrink-0">
-                        {p.suggested_char_id && (
-                          <button type="button" className="kg-pill kg-pill-red kg-pill-sm" onClick={() => doPromoteGhost(p.id)}>
-                            送出邀請
+                    <div key={p.id} className="kg-card-flat p-3 bg-white">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="min-w-0">
+                          <b className="text-sm">{p.ghost_name}</b>
+                          {p.label && <span className="text-xs text-[#6f6156] ml-2">（{p.label}）</span>}
+                          {p.suggested_char_id && (
+                            <span className="text-xs text-[#6f6156] ml-2">
+                              站上有同名角色，要送出正式邀請嗎？
+                            </span>
+                          )}
+                          {p.note && !ghostEditOpen[p.id] && (
+                            <p className="text-xs text-[#6f6156] mt-1 leading-relaxed">{p.note}</p>
+                          )}
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          {p.suggested_char_id && (
+                            <button type="button" className="kg-pill kg-pill-red kg-pill-sm" onClick={() => doPromoteGhost(p.id)}>
+                              送出邀請
+                            </button>
+                          )}
+                          <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm" onClick={() => openGhostEdit(p)}>
+                            {ghostEditOpen[p.id] ? '取消' : '編輯'}
                           </button>
-                        )}
-                        <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm" onClick={() => doDeleteGhost(p.id)}>
-                          刪除
-                        </button>
+                          <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm" onClick={() => doDeleteGhost(p.id)}>
+                            刪除
+                          </button>
+                        </div>
                       </div>
+                      {ghostEditOpen[p.id] && (
+                        <div className="grid sm:grid-cols-2 gap-2 mt-3">
+                          <input
+                            className="kg-input"
+                            value={ghostEditLabel[p.id] ?? ''}
+                            onChange={(e) => setGhostEditLabel((l) => ({ ...l, [p.id]: e.target.value }))}
+                            placeholder="你們的關係"
+                            maxLength={40}
+                          />
+                          <input
+                            className="kg-input"
+                            value={ghostEditNote[p.id] ?? ''}
+                            onChange={(e) => setGhostEditNote((n) => ({ ...n, [p.id]: e.target.value }))}
+                            placeholder="互動筆記"
+                            maxLength={2000}
+                          />
+                          <button
+                            type="button"
+                            className="kg-pill kg-pill-red kg-pill-sm sm:col-span-2"
+                            disabled={ghostEditBusy[p.id]}
+                            onClick={() => doEditGhost(p.id)}
+                          >
+                            {ghostEditBusy[p.id] ? '儲存中…' : '儲存'}
+                          </button>
+                        </div>
+                      )}
                     </div>
                   ))}
                 </div>
