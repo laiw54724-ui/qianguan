@@ -17,7 +17,6 @@ import {
   TagGroupEditor,
   LoginPrompt,
   toast,
-  type BlockEditorMode,
 } from '../components/kg';
 import { fieldHasContent } from '../lib/fvals';
 import { SocialLinksEditor } from '../components/links';
@@ -61,9 +60,7 @@ export default function ManagePage({ slug }: { slug: string }) {
   const [fields, setFields] = useState<FieldDef[]>([]);
   const [tagGroups, setTagGroups] = useState<TagGroup[]>([]);
   const [links, setLinks] = useState<SocialLink[]>([]);
-  const [worldMode, setWorldMode] = useState<BlockEditorMode>('fill');
   const [tab, setTab] = useState<'info' | 'world' | 'fields' | 'tags' | 'roster'>('info');
-  const [seedOpen, setSeedOpen] = useState<string | null>(null);
 
   const [rows, setRows] = useState<RosterRow[]>([]);
   const [error, setError] = useState<string | null>(null);
@@ -88,7 +85,6 @@ export default function ManagePage({ slug }: { slug: string }) {
     setFields(p.field_schema);
     setTagGroups(p.tag_groups ?? []);
     setLinks(p.links ?? []);
-    setWorldMode(p.world_blocks.length ? 'fill' : 'schema');
   };
 
   const dirty = !!owner && snapshot.current !== '' && snapshot.current !== JSON.stringify({ ...currentForm(), joinCode: '' });
@@ -387,19 +383,9 @@ export default function ManagePage({ slug }: { slug: string }) {
         <section className="kg-rise">
           <div className="flex flex-wrap items-center gap-3 mb-3">
             <SecLabel>世界觀</SecLabel>
-            <div className="kg-seg ml-auto" role="tablist" aria-label="世界觀編輯模式">
-              <button type="button" role="tab" aria-selected={worldMode === 'fill'} aria-pressed={worldMode === 'fill'} onClick={() => setWorldMode('fill')}>
-                填寫
-              </button>
-              <button type="button" role="tab" aria-selected={worldMode === 'schema'} aria-pressed={worldMode === 'schema'} onClick={() => setWorldMode('schema')}>
-                組版
-              </button>
-            </div>
           </div>
           <p className="text-sm text-[#6f6156] mb-4 leading-relaxed">
-            {worldMode === 'fill'
-              ? '點一章打開來填。要加章節或改欄位型別，點「組版」。'
-              : '用年表／地理／勢力／規則／用語／素材模板加一章。加完會回到填寫。'}
+            用年表／地理／勢力／規則／用語／素材模板加一章，或從空白區塊開始，加完就能直接填內容。
           </p>
           <BlocksEditor
             value={worldBlocks}
@@ -407,13 +393,6 @@ export default function ManagePage({ slug }: { slug: string }) {
             roster={rows.map((r) => ({ id: r.character.id, name: r.character.name, avatar_url: r.character.avatar_url }))}
             slug={slug}
             variant="world"
-            mode={worldMode}
-            seedOpenId={seedOpen}
-            onRequestSchema={() => setWorldMode('schema')}
-            onAdded={(id) => {
-              setSeedOpen(id);
-              setWorldMode('fill');
-            }}
           />
         </section>
 

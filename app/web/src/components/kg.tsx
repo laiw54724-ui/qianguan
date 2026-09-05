@@ -1031,7 +1031,6 @@ const newBlockField = (type: BlockFieldType, label = '', extra: Partial<BlockFie
   ...extra,
 });
 
-export type BlockEditorMode = 'fill' | 'schema';
 export type BlockEditorVariant = 'character' | 'world';
 
 const CHAR_TEMPLATES: Array<{ name: string; desc: string; make: () => { title: string; fields: BlockField[] } }> = [
@@ -1195,6 +1194,7 @@ function BlockFieldRow({
   const t = f.type;
   const isTexty = t === 'text' || t === 'textarea';
   const needsOptions = t === 'select' || t === 'multiselect';
+  const [longTextSheet, setLongTextSheet] = useState(false);
   const menu = [
     {
       label: (f.visibility ?? 'public') === 'private' ? '改為公開' : '改為私人',
@@ -1263,12 +1263,33 @@ function BlockFieldRow({
           placeholder="選項，逗號分隔：人類,精靈"
         />
       )}
-      {isTexty ? (
-        t === 'text' ? (
-          <input className="kg-input" value={f.content} onChange={(e) => onPatch({ content: e.target.value })} placeholder={f.placeholder || '內容…'} maxLength={200} />
-        ) : (
-          <textarea className="kg-textarea" rows={4} value={f.content} onChange={(e) => onPatch({ content: e.target.value })} placeholder={f.placeholder || '內容…'} maxLength={4000} />
-        )
+      {t === 'text' ? (
+        <input className="kg-input" value={f.content} onChange={(e) => onPatch({ content: e.target.value })} placeholder={f.placeholder || '內容…'} maxLength={200} />
+      ) : t === 'textarea' ? (
+        // Ticket-09：長文欄位改用跟以前填寫模式一樣的「預覽→點擊展開全螢幕」，不要在卡片裡塞一個
+        // 小小的 rows=4 內嵌框——這正是 Ticket-02 那次死機的舞台，全螢幕 sheet 有更大的編輯空間。
+        <>
+          <button type="button" className="kg-fill-preview" onClick={() => setLongTextSheet(true)}>
+            {f.content.trim() ? (
+              <span className="line-clamp-3 whitespace-pre-wrap">{f.content.trim()}</span>
+            ) : (
+              <span className="kg-fill-preview-empty">點擊寫長文</span>
+            )}
+          </button>
+          {longTextSheet && (
+            <FillSheet title={f.label || '編輯'} onDone={() => setLongTextSheet(false)}>
+              <textarea
+                className="kg-textarea"
+                rows={12}
+                autoFocus
+                value={f.content}
+                onChange={(e) => onPatch({ content: e.target.value })}
+                placeholder={f.placeholder || '內容…'}
+                maxLength={4000}
+              />
+            </FillSheet>
+          )}
+        </>
       ) : t === 'image' || t === 'pdf' ? (
         <BlockFileInput block={f} onPatch={onPatch} />
       ) : (
@@ -1283,104 +1304,7 @@ function BlockFieldRow({
   );
 }
 
-// 填寫模式：只改內容，不露型別／刪除／排序
-function FillFieldRow({
-  field: f,
-  onPatch,
-  roster,
-}: {
-  field: BlockField;
-  onPatch: (p: Partial<BlockField>) => void;
-  roster: RosterLite[];
-}) {
-  const t = f.type;
-  const [sheet, setSheet] = useState(false);
-  const useSheet = t === 'textarea' || t === 'timeline' || t === 'calendar' || t === 'image';
-  const editor =
-    t === 'image' || t === 'pdf' ? (
-      <BlockFileInput block={f} onPatch={onPatch} />
-    ) : t === 'radar' ? (
-      <RadarInput value={f.content} onChange={(v) => onPatch({ content: v })} compact />
-    ) : t === 'text' ? (
-      <input
-        className="kg-input"
-        value={f.content}
-        onChange={(e) => onPatch({ content: e.target.value })}
-        placeholder={f.placeholder || '內容…'}
-        maxLength={200}
-      />
-    ) : t === 'textarea' ? (
-      <textarea
-        className="kg-textarea"
-        rows={12}
-        autoFocus={sheet}
-        value={f.content}
-        onChange={(e) => onPatch({ content: e.target.value })}
-        placeholder={f.placeholder || '內容…'}
-        maxLength={4000}
-      />
-    ) : (
-      <FieldInput
-        def={{ key: f.id, label: f.label || '欄位', type: t, options: f.options, placeholder: f.placeholder, max: f.max, style: f.style }}
-        value={f.content}
-        onChange={(v) => onPatch({ content: v })}
-        roster={roster}
-      />
-    );
-
-  let preview: ReactNode = <span className="kg-fill-preview-empty">點擊編輯</span>;
-  if (t === 'textarea') {
-    preview = f.content.trim() ? (
-      <span className="line-clamp-3 whitespace-pre-wrap">{f.content.trim()}</span>
-    ) : (
-      <span className="kg-fill-preview-empty">點擊寫長文</span>
-    );
-  } else if (t === 'timeline' || t === 'calendar') {
-    const n = timelineVisible(parseTimeline(f.content)).length;
-    preview = n ? <span>{n} 則</span> : <span className="kg-fill-preview-empty">點擊編輯</span>;
-  } else if (t === 'image') {
-    const n = f.images?.length ?? 0;
-    preview = n ? (
-      <span className="flex gap-1.5 overflow-hidden">
-        {(f.images ?? []).slice(0, 4).map((src) => (
-          <img key={src.slice(0, 48)} src={src} alt="" className="w-12 h-12 rounded-lg object-cover border border-[#e8dfd4]" />
-        ))}
-        {n > 4 && <span className="font-mono2 text-[11px] text-[#6f6156] self-center">+{n - 4}</span>}
-      </span>
-    ) : (
-      <span className="kg-fill-preview-empty">點擊加入圖片</span>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      {(f.label || (f.visibility ?? 'public') === 'private') && (
-        <div className="flex items-center gap-2">
-          {f.label && <div className="kg-seclabel">（{f.label}）</div>}
-          {(f.visibility ?? 'public') === 'private' && (
-            <span className="font-mono2 text-[10px] text-[#a8455e]">🔒 私人</span>
-          )}
-        </div>
-      )}
-      {useSheet ? (
-        <>
-          <button type="button" className="kg-fill-preview" onClick={() => setSheet(true)}>
-            {preview}
-          </button>
-          {sheet && (
-            <FillSheet title={f.label || '編輯'} onDone={() => setSheet(false)}>
-              {editor}
-            </FillSheet>
-          )}
-        </>
-      ) : (
-        editor
-      )}
-    </div>
-  );
-}
-
-// 單一區塊的編輯卡（填寫＝手風琴；組版＝型別／排序／預覽）
+// 單一區塊的編輯卡：型別／排序／預覽（Ticket-09：拆掉填寫模式後只剩這一種）
 function BlockEditCard({
   block: b,
   index: i,
@@ -1390,9 +1314,6 @@ function BlockEditCard({
   onRemove,
   roster,
   slug,
-  mode,
-  open,
-  onToggle,
 }: {
   block: WorldBlock;
   index: number;
@@ -1402,9 +1323,6 @@ function BlockEditCard({
   onRemove: () => void;
   roster: RosterLite[];
   slug?: string;
-  mode: BlockEditorMode;
-  open: boolean;
-  onToggle: () => void;
 }) {
   const [showPreview, setShowPreview] = useState(false);
   const patchField = (fid: string, p: Partial<BlockField>) =>
@@ -1416,33 +1334,6 @@ function BlockEditCard({
     [next[fi], next[j]] = [next[j], next[fi]];
     onPatch({ fields: next });
   };
-
-  if (mode === 'fill') {
-    const filledN = b.fields.filter((f) => fieldHasContent(f.type, f.content, f.images)).length;
-    return (
-      <div className="kg-card-flat overflow-hidden">
-        <button type="button" className="kg-acc-head" aria-expanded={open} onClick={onToggle}>
-          <span className={`w-2 h-2 rounded-full shrink-0 ${filledN ? 'bg-[#9e4b2c]' : 'bg-[#e8dfd4]'}`} />
-          <span className="font-bold flex-1 truncate">{b.title || '未命名區塊'}</span>
-          <span className="font-mono2 text-[10px] text-[#6f6156] shrink-0">
-            {filledN}/{b.fields.length} 已填
-          </span>
-          <span className="kg-chevron text-[#6f6156]" aria-hidden="true">
-            {open ? '▴' : '▾'}
-          </span>
-        </button>
-        {open && (
-          <div className="p-4 space-y-4 border-t-2 border-[#e8dfd4]">
-            {b.fields.length === 0 ? (
-              <p className="text-sm text-[#6f6156]">這塊還沒有欄位。到「組版」去加。</p>
-            ) : (
-              b.fields.map((f) => <FillFieldRow key={f.id} field={f} onPatch={(p) => patchField(f.id, p)} roster={roster} />)
-            )}
-          </div>
-        )}
-      </div>
-    );
-  }
 
   return (
     <div className="kg-card-flat overflow-hidden">
@@ -1503,34 +1394,15 @@ export function BlocksEditor({
   onChange,
   roster = [],
   slug,
-  mode = 'schema',
   variant = 'character',
-  onRequestSchema,
-  onAdded,
-  seedOpenId,
 }: {
   value: WorldBlock[];
   onChange: (v: WorldBlock[]) => void;
   roster?: RosterLite[];
   slug?: string;
-  mode?: BlockEditorMode;
   variant?: BlockEditorVariant;
-  onRequestSchema?: () => void;
-  onAdded?: (id: string) => void;
-  seedOpenId?: string | null;
 }) {
   const templates = variant === 'world' ? WORLD_TEMPLATES : CHAR_TEMPLATES;
-  const [openId, setOpenId] = useState<string | null>(seedOpenId ?? value[0]?.id ?? null);
-  useEffect(() => {
-    if (seedOpenId && value.some((b) => b.id === seedOpenId)) {
-      setOpenId(seedOpenId);
-    }
-  }, [seedOpenId, value]);
-  useEffect(() => {
-    if (mode !== 'fill') return;
-    if (openId && value.some((b) => b.id === openId)) return;
-    setOpenId(value[value.length - 1]?.id ?? null);
-  }, [mode, value, openId]);
 
   const patch = (id: string, p: Partial<WorldBlock>) => onChange(value.map((b) => (b.id === id ? { ...b, ...p } : b)));
   const move = (i: number, dir: -1 | 1) => {
@@ -1543,22 +1415,10 @@ export function BlocksEditor({
   const addFrom = (make?: () => { title: string; fields: BlockField[] }) => {
     const block = { id: uid('wb'), ...(make ? make() : { title: '', fields: [] as BlockField[] }) };
     onChange([...value, block]);
-    setOpenId(block.id);
-    onAdded?.(block.id);
   };
 
   return (
     <div className="space-y-4">
-      {value.length === 0 && mode === 'fill' && (
-        <div className="kg-card-flat p-5 text-center space-y-3">
-          <p className="text-sm text-[#6f6156]">還沒有區塊。</p>
-          {onRequestSchema && (
-            <button type="button" className="kg-pill kg-pill-red min-h-11" onClick={onRequestSchema}>
-              去組版，加一塊
-            </button>
-          )}
-        </div>
-      )}
       {value.map((b, i) => (
         <BlockEditCard
           key={b.id}
@@ -1570,38 +1430,31 @@ export function BlocksEditor({
           onRemove={() => onChange(value.filter((x) => x.id !== b.id))}
           roster={roster}
           slug={slug}
-          mode={mode}
-          open={openId === b.id}
-          onToggle={() => setOpenId(openId === b.id ? null : b.id)}
         />
       ))}
-      {mode === 'schema' && (
-        <>
-          <button
-            type="button"
-            className="kg-pill kg-pill-ghost w-full justify-center border-dashed min-h-11"
-            onClick={() => addFrom()}
-          >
-            ＋ 空白區塊
-          </button>
-          <div>
-            <div className="font-mono2 text-[11px] text-[#6f6156] mb-1.5">或從模板開始（套用後都能再增減欄位）</div>
-            <div className="flex flex-wrap gap-1.5">
-              {templates.map((t) => (
-                <button
-                  key={t.name}
-                  type="button"
-                  title={t.desc}
-                  className="kg-pill kg-pill-ghost kg-pill-sm border-dashed min-h-10"
-                  onClick={() => addFrom(t.make)}
-                >
-                  ＋ {t.name}
-                </button>
-              ))}
-            </div>
-          </div>
-        </>
-      )}
+      <button
+        type="button"
+        className="kg-pill kg-pill-ghost w-full justify-center border-dashed min-h-11"
+        onClick={() => addFrom()}
+      >
+        ＋ 空白區塊
+      </button>
+      <div>
+        <div className="font-mono2 text-[11px] text-[#6f6156] mb-1.5">或從模板開始（套用後都能再增減欄位）</div>
+        <div className="flex flex-wrap gap-1.5">
+          {templates.map((t) => (
+            <button
+              key={t.name}
+              type="button"
+              title={t.desc}
+              className="kg-pill kg-pill-ghost kg-pill-sm border-dashed min-h-10"
+              onClick={() => addFrom(t.make)}
+            >
+              ＋ {t.name}
+            </button>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

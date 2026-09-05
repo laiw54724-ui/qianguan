@@ -17,7 +17,6 @@ import {
   LoginPrompt,
   TagPicker,
   toast,
-  type BlockEditorMode,
   type RosterLite,
 } from '../components/kg';
 import { SocialLinksEditor } from '../components/links';
@@ -53,9 +52,7 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [draftNotice, setDraftNotice] = useState(false);
-  const [mode, setMode] = useState<BlockEditorMode>('fill');
   const [sec, setSec] = useState<'links' | 'fields' | 'tags' | ''>('fields');
-  const [seedOpen, setSeedOpen] = useState<string | null>(null);
   // 1-3：存檔後才問，不是存檔當下——「加入了」已經公開過一次，這裡只問後續的更新
   const [sharePrompt, setSharePrompt] = useState(false);
   const [shareNote, setShareNote] = useState('');
@@ -246,19 +243,8 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
         <div className="mt-4 mb-6">
           <div className="flex flex-wrap items-center gap-3">
             <SecLabel>編輯角色</SecLabel>
-            <div className="kg-seg ml-auto" role="tablist" aria-label="編輯模式">
-              <button type="button" role="tab" aria-selected={mode === 'fill'} aria-pressed={mode === 'fill'} onClick={() => setMode('fill')}>
-                填寫
-              </button>
-              <button type="button" role="tab" aria-selected={mode === 'schema'} aria-pressed={mode === 'schema'} onClick={() => setMode('schema')}>
-                組版
-              </button>
-            </div>
           </div>
           <h1 className="font-display font-black text-4xl mt-2">{name || data.character.name}</h1>
-          <p className="font-mono2 text-[11px] text-[#6f6156] mt-1.5">
-            {mode === 'fill' ? '只填已有欄位。要加區塊或改型別，點「組版」。' : '加區塊、改型別、排序。填內容請回到「填寫」。'}
-          </p>
         </div>
 
         {data.character.status === 'draft' && (
@@ -295,111 +281,81 @@ export default function CharEditPage({ slug, charId }: { slug: string; charId: s
           </div>
         )}
 
-        {mode === 'fill' ? (
-          <div className="space-y-3 kg-rise">
-            <div className="kg-card-flat p-4">
-              <div className="flex gap-3 items-start">
-                <div className="shrink-0">
-                  <ImageField label="頭像" value={avatarUrl} onChange={setAvatarUrl} square />
+        <div className="space-y-3 kg-rise">
+          <div className="kg-card-flat p-4">
+            <div className="flex gap-3 items-start">
+              <div className="shrink-0">
+                <ImageField label="頭像" value={avatarUrl} onChange={setAvatarUrl} square />
+              </div>
+              <div className="flex-1 min-w-0 space-y-3">
+                <div>
+                  <label htmlFor="fld-CharEdit-1" className="kg-label">
+                    角色名稱 <span className="req">*</span>
+                  </label>
+                  <ImeInput id="fld-CharEdit-1" className="kg-input" value={name} onChange={setName} maxLength={30} />
                 </div>
-                <div className="flex-1 min-w-0 space-y-3">
-                  <div>
-                    <label htmlFor="fld-CharEdit-1" className="kg-label">
-                      角色名稱 <span className="req">*</span>
-                    </label>
-                    <ImeInput id="fld-CharEdit-1" className="kg-input" value={name} onChange={setName} maxLength={30} />
-                  </div>
-                  <div>
-                    <label htmlFor="fld-CharEdit-2" className="kg-label">一句話介紹</label>
-                    <ImeInput id="fld-CharEdit-2" className="kg-input" value={oneLiner} onChange={setOneLiner} placeholder="名單上顯示的一行" maxLength={80} />
-                  </div>
+                <div>
+                  <label htmlFor="fld-CharEdit-2" className="kg-label">一句話介紹</label>
+                  <ImeInput id="fld-CharEdit-2" className="kg-input" value={oneLiner} onChange={setOneLiner} placeholder="名單上顯示的一行" maxLength={80} />
                 </div>
               </div>
             </div>
+          </div>
 
-            {(project.tag_groups ?? []).length > 0 && (
-              <FillSection
-                title="分類"
-                meta={`${tags.length}`}
-                open={sec === 'tags'}
-                onToggle={() => setSec(sec === 'tags' ? '' : 'tags')}
-              >
-                <TagPicker groups={project.tag_groups ?? []} value={tags} onChange={setTags} />
-              </FillSection>
-            )}
-
+          {(project.tag_groups ?? []).length > 0 && (
             <FillSection
-              title="連結"
-              meta={`${sanitizeLinks(links).length}`}
-              open={sec === 'links'}
-              onToggle={() => setSec(sec === 'links' ? '' : 'links')}
+              title="分類"
+              meta={`${tags.length}`}
+              open={sec === 'tags'}
+              onToggle={() => setSec(sec === 'tags' ? '' : 'tags')}
             >
-              <SocialLinksEditor value={links} onChange={setLinks} hideIntro />
+              <TagPicker groups={project.tag_groups ?? []} value={tags} onChange={setTags} />
             </FillSection>
+          )}
 
-            {project.field_schema.length > 0 && (
-              <FillSection
-                title="企劃欄位"
-                meta={`${project.field_schema.filter((f) => fieldHasContent(f.type ?? 'text', profile[f.key] ?? '')).length}/${project.field_schema.length}`}
-                open={sec === 'fields'}
-                onToggle={() => setSec(sec === 'fields' ? '' : 'fields')}
-              >
-                {project.field_schema.map((f) => (
-                  <div key={f.key}>
-                    <label className="kg-label" htmlFor={`pf-${f.key}`}>
-                      {f.label} {f.required && <span className="req">*</span>}
-                      {(f.visibility ?? 'public') === 'private' && (
-                        <span className="ml-1.5 font-mono2 text-[10px] text-[#a8455e] font-normal">🔒 私人</span>
-                      )}
-                    </label>
-                    <SheetableField
-                      id={`pf-${f.key}`}
-                      def={f}
-                      value={profile[f.key] ?? ''}
-                      onChange={(v) => setProfile({ ...profile, [f.key]: v })}
-                      roster={roster}
-                    />
-                  </div>
-                ))}
-              </FillSection>
-            )}
+          <FillSection
+            title="連結"
+            meta={`${sanitizeLinks(links).length}`}
+            open={sec === 'links'}
+            onToggle={() => setSec(sec === 'links' ? '' : 'links')}
+          >
+            <SocialLinksEditor value={links} onChange={setLinks} hideIntro />
+          </FillSection>
 
-            <div className="pt-1">
-              <div className="kg-seclabel mb-2">（角色卡）</div>
-              <BlocksEditor
-                value={blocks}
-                onChange={setBlocks}
-                roster={roster}
-                slug={slug}
-                mode="fill"
-                variant="character"
-                seedOpenId={seedOpen}
-                onRequestSchema={() => setMode('schema')}
-              />
-            </div>
+          {project.field_schema.length > 0 && (
+            <FillSection
+              title="企劃欄位"
+              meta={`${project.field_schema.filter((f) => fieldHasContent(f.type ?? 'text', profile[f.key] ?? '')).length}/${project.field_schema.length}`}
+              open={sec === 'fields'}
+              onToggle={() => setSec(sec === 'fields' ? '' : 'fields')}
+            >
+              {project.field_schema.map((f) => (
+                <div key={f.key}>
+                  <label className="kg-label" htmlFor={`pf-${f.key}`}>
+                    {f.label} {f.required && <span className="req">*</span>}
+                    {(f.visibility ?? 'public') === 'private' && (
+                      <span className="ml-1.5 font-mono2 text-[10px] text-[#a8455e] font-normal">🔒 私人</span>
+                    )}
+                  </label>
+                  <SheetableField
+                    id={`pf-${f.key}`}
+                    def={f}
+                    value={profile[f.key] ?? ''}
+                    onChange={(v) => setProfile({ ...profile, [f.key]: v })}
+                    roster={roster}
+                  />
+                </div>
+              ))}
+            </FillSection>
+          )}
 
-            {error && <ErrorBox>{error}</ErrorBox>}
+          <div className="pt-1">
+            <div className="kg-seclabel mb-2">（角色卡）</div>
+            <BlocksEditor value={blocks} onChange={setBlocks} roster={roster} slug={slug} variant="character" />
           </div>
-        ) : (
-          <div className="space-y-4 kg-rise">
-            <p className="text-sm text-[#6f6156] leading-relaxed">
-              從模板加一塊，或空白開始。加完會回到填寫。填內容請回到「填寫」。
-            </p>
-            <BlocksEditor
-              value={blocks}
-              onChange={setBlocks}
-              roster={roster}
-              slug={slug}
-              mode="schema"
-              variant="character"
-              onAdded={(id) => {
-                setSeedOpen(id);
-                setMode('fill');
-              }}
-            />
-            {error && <ErrorBox>{error}</ErrorBox>}
-          </div>
-        )}
+
+          {error && <ErrorBox>{error}</ErrorBox>}
+        </div>
       </div>
       <StickySaveBar inShell dirty={dirty} busy={busy} onSave={() => { void doSave(); }} />
       {sharePrompt && (
