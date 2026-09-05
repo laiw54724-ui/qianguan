@@ -7,7 +7,10 @@ import type { Character } from '../lib/types';
 
 export default function MinePage({ slug }: { slug: string }) {
   const [project, setProject] = useState<ProjectView | null | undefined>(undefined);
-  const [mine, setMine] = useState<Character[]>([]);
+  // Ticket-12：undefined＝角色清單這段還在查，[]＝查完了、真的沒有——用同一個 [] 代表
+  // 「還沒查完」跟「查完是空的」會讓畫面在第二段查詢回來前先閃一下「還沒有角色」的空狀態，
+  // 查完才變成真正的列表。分開兩種狀態，讀取中顯示骨架而不是誤導的空狀態文案。
+  const [mine, setMine] = useState<Character[] | undefined>(undefined);
 
   useEffect(() => {
     (async () => {
@@ -42,7 +45,9 @@ export default function MinePage({ slug }: { slug: string }) {
     <ProjectShell slug={slug} title={project.title} iconUrl={project.icon_url} active="mine">
       <div className="mx-auto max-w-5xl px-4 sm:px-6 pt-8">
         <h1 className="font-huninn text-2xl mb-5">{project.title} ／ 我的角色</h1>
-        {mine.length === 0 ? (
+        {mine === undefined ? (
+          <PageLoading />
+        ) : mine.length === 0 ? (
           <EmptyNote>
             這個瀏覽器還沒有你在這個企劃的角色——用編輯碼在「名單」貼碼救援，或直接加入企劃。
           </EmptyNote>
