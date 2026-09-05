@@ -47,8 +47,11 @@ export async function sha256hex(text: string): Promise<string> {
     .join('');
 }
 
-/** 加入碼正規化：建立與驗證必須同一規則 */
-export const normJoinCode = (s: string) => s.trim().toLowerCase();
+/** 加入碼正規化：建立與驗證必須同一規則。
+ * 拿掉全部空白（不只是頭尾）——加入碼是要在 Discord 上手動轉述、打字的一次性密語，
+ * 不是結構化欄位，「Fog 2026」跟「fog2026」對使用者來說是同一組密語，只是打字習慣不同。
+ * 0-1 驗收標準明確要求這兩種都要能通過。 */
+export const normJoinCode = (s: string) => s.replace(/\s+/g, '').toLowerCase();
 
 /** 使用者輸入公開 ID 的正規化：I/L→1、O→0 寬容映射（§4.1） */
 export const normPublicId = (s: string) => s.trim().toUpperCase().replace(/[IL]/g, '1').replace(/O/g, '0');

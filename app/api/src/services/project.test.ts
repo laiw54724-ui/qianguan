@@ -4,6 +4,7 @@ import { drizzle } from 'drizzle-orm/d1';
 import { describe, expect, it } from 'vitest';
 import { characters } from '../db/schema';
 import * as projectSvc from './project';
+import * as charSvc from './character';
 
 const db = drizzle(env.DB);
 
@@ -17,6 +18,26 @@ describe('createProject', () => {
     expect(r.project.title).toBe('測試企劃');
     expect('ownerToken' in r).toBe(false);
     expect('transferCode' in r).toBe(false);
+  });
+});
+
+describe('加入碼大小寫/空白容錯（0-1）', () => {
+  it('設定含空白與大寫的加入碼，用不同大小寫與有無空白都能加入', async () => {
+    const r = await projectSvc.createProject(
+      db,
+      { title: '加入碼測試企劃', summary: '', join_mode: 'code', join_code: 'Fog 2026' },
+      'discord_owner',
+    );
+    expect(r.project.has_join_code).toBe(true);
+
+    const ok1 = await charSvc.joinProject(db, r.project.slug, 'd_a', { name: '角色A', join_code: 'fog2026' });
+    expect('ok' in ok1).toBe(true);
+
+    const ok2 = await charSvc.joinProject(db, r.project.slug, 'd_b', { name: '角色B', join_code: ' FOG2026 ' });
+    expect('ok' in ok2).toBe(true);
+
+    const bad = await charSvc.joinProject(db, r.project.slug, 'd_c', { name: '角色C', join_code: '完全不對' });
+    expect('error' in bad).toBe(true);
   });
 });
 
