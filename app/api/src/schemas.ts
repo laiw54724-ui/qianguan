@@ -6,12 +6,15 @@ import { z } from 'zod';
 const str = (max: number) => z.string().max(max);
 const optStr = (max: number) => z.string().max(max).optional();
 
+// Ticket-15：相簿一張圖片可能是舊資料的純字串，也可能是新的 { url, caption }——
+// 兩種都要能存，讀取端（前端 normalizeGalleryImages）負責統一成同一個形狀。
+const galleryImage = z.union([str(900_000), z.looseObject({ url: str(900_000), caption: optStr(500) })]);
 const blockField = z.looseObject({
   id: str(64),
   label: str(200),
   type: str(32),
   content: str(900_000),
-  images: z.array(str(900_000)).max(30).optional(),
+  images: z.array(galleryImage).max(30).optional(),
   options: z.array(str(200)).max(50).optional(),
 });
 const worldBlock = z.looseObject({

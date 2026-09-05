@@ -494,6 +494,15 @@
     background: var(--cyan-soft);
   }
 
+  /* Ticket-15：滿版滑動相簿——原生 scroll-snap 靠捲動軸滑動，藏掉捲軸讓它看起來像手勢滑動 */
+  .kg-scrollbar-hide {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .kg-scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+
   .kg-fill-preview {
     display: block;
     width: 100%;

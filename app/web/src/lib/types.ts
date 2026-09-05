@@ -9,8 +9,15 @@ export type EventType = 'char_joined' | 'char_updated' | 'relation_accepted' | '
 
 // 世界觀 / 角色卡 / 牽線共用的內容區塊
 // 區塊＝容器，裡面可放多個自訂欄位（名帖式）；每個欄位有型別與顯示設定
-export type GalleryLayout = 'carousel' | 'grid';
+export type GalleryLayout = 'carousel' | 'grid' | 'swipe'; // swipe＝無邊框滿版左右滑動（Ticket-15）
 export type BlockFieldType = FieldType | 'pdf';
+
+// 相簿的一張圖片。舊資料是純字串陣列（Ticket-15 之前），讀取端一律用
+// normalizeGalleryImages() 統一轉成這個形狀，寫入時一律存這個形狀，不用遷移舊資料。
+export interface GalleryImage {
+  url: string;
+  caption?: string;
+}
 
 // 區塊內的一個欄位
 export interface BlockField {
@@ -20,8 +27,8 @@ export interface BlockField {
   content: string; // text→內文；pdf→dataURL/網址；image→首圖（相容）；結構化型別→JSON 字串
   style?: FieldStyle; // text / textarea 的顯示樣式
   visibility?: 'public' | 'private'; // private＝只有本人與開設者看得見
-  images?: string[]; // image→整組相簿
-  layout?: GalleryLayout; // image→輪播或縮圖
+  images?: (string | GalleryImage)[]; // image→整組相簿；混合型別是相容舊資料，見 GalleryImage
+  layout?: GalleryLayout; // image→呈現方式
   fileName?: string; // pdf
   max?: number; // rating 的滿分（3 / 5 / 10）
   options?: string[]; // select / multiselect 的選項

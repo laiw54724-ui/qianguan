@@ -655,6 +655,7 @@ import { readImageFile, readMediaFile, readPdfFile } from '../lib/files';
 import {
   checklistVisible,
   fieldHasContent,
+  normalizeGalleryImages,
   paletteVisible,
   parseChecklist,
   parseCsv,
@@ -676,6 +677,7 @@ import type {
   FieldDef,
   FieldStyle,
   FieldType,
+  GalleryImage,
   GalleryLayout,
   PaletteColor,
   QaItem,
@@ -772,7 +774,7 @@ export function PreviewModal({
   startIndex = 0,
   onClose,
 }: {
-  block: { title: string; type: string; content: string; images?: string[]; fileName?: string } | null;
+  block: { title: string; type: string; content: string; images?: (string | GalleryImage)[]; fileName?: string } | null;
   startIndex?: number;
   onClose: () => void;
 }) {
@@ -809,7 +811,8 @@ export function PreviewModal({
   }, [block]);
 
   if (!block) return null;
-  const images = block.images && block.images.length > 0 ? block.images : /^(data:image|https?:)/.test(block.content) && block.content ? [block.content] : [];
+  const rawImages = block.images && block.images.length > 0 ? block.images : /^(data:image|https?:)/.test(block.content) && block.content ? [block.content] : [];
+  const images = normalizeGalleryImages(rawImages);
   const cur = Math.min(idx, Math.max(0, images.length - 1));
   return (
     <div
@@ -858,7 +861,12 @@ export function PreviewModal({
             )
           ) : (
             <>
-              <img src={images[cur]} alt={`${block.title} ${cur + 1}`} className="max-w-full max-h-[68vh] rounded-lg object-contain" />
+              <img src={images[cur]?.url} alt={`${block.title} ${cur + 1}`} className="max-w-full max-h-[68vh] rounded-lg object-contain" />
+              {images[cur]?.caption && (
+                <p className="absolute bottom-3 left-3 right-3 text-center font-mono2 text-xs bg-[#33261e]/70 text-[#fbf8f3] rounded-lg px-3 py-1.5 mx-auto max-w-[90%]">
+                  {images[cur].caption}
+                </p>
+              )}
               {images.length > 1 && (
                 <>
                   <button
@@ -887,12 +895,12 @@ export function PreviewModal({
   );
 }
 
-// ---------- 相簿呈現（企劃頁／角色頁共用）：輪播或縮圖 ----------
+// ---------- 相簿呈現（企劃頁／角色頁共用）：輪播／縮圖／滿版滑動 ----------
 export interface PreviewTarget {
   title: string;
   type: string; // 'image' | 'pdf'
   content: string;
-  images?: string[];
+  images?: (string | GalleryImage)[];
   fileName?: string;
 }
 
@@ -905,25 +913,69 @@ export function GalleryView({
 }: {
   title: string;
   content: string;
-  images?: string[];
+  images?: (string | GalleryImage)[];
   layout?: GalleryLayout;
   onPreview: (t: PreviewTarget, i: number) => void;
 }) {
-  const images = imagesProp && imagesProp.length > 0 ? imagesProp : /^(data:image|https?:)/.test(content) && content ? [content] : [];
+  const rawImages = imagesProp && imagesProp.length > 0 ? imagesProp : /^(data:image|https?:)/.test(content) && content ? [content] : [];
+  const images = normalizeGalleryImages(rawImages);
   const [idx, setIdx] = useState(0);
   if (images.length === 0) return null;
   const cur = Math.min(idx, images.length - 1);
-  const open = (i: number) => onPreview({ title, type: 'image', content: images[i], images }, i);
+  const open = (i: number) => onPreview({ title, type: 'image', content: images[i].url, images }, i);
+
+  if (layout === 'swipe') {
+    // Ticket-15：無邊框滿版左右滑動——用原生 scroll-snap 而不是拖曳手勢庫，
+    // 手機上就是天生的橫向滑動捲動，不用另外接手勢事件也不會跟頁面垂直捲動打架。
+    return (
+      <div className="-mx-4 sm:-mx-6">
+        <div
+          className="flex overflow-x-auto snap-x snap-mandatory kg-scrollbar-hide"
+          onScroll={(e) => {
+            const el = e.currentTarget;
+            if (el.clientWidth > 0) setIdx(Math.round(el.scrollLeft / el.clientWidth));
+          }}
+        >
+          {images.map((img, i) => (
+            <button
+              key={i}
+              type="button"
+              className="shrink-0 w-full snap-center relative"
+              onClick={() => open(i)}
+            >
+              <img src={img.url} alt={`${title} ${i + 1}`} className="w-full max-h-[70vh] object-cover" />
+              {img.caption && (
+                <p className="absolute bottom-0 left-0 right-0 text-left font-mono2 text-xs bg-[#33261e]/70 text-[#fbf8f3] px-4 py-2">
+                  {img.caption}
+                </p>
+              )}
+            </button>
+          ))}
+        </div>
+        {images.length > 1 && (
+          <div className="flex justify-center gap-1.5 mt-2">
+            {images.map((_, i) => (
+              <span key={i} className={`w-1.5 h-1.5 rounded-full ${i === cur ? 'bg-[#9e4b2c]' : 'bg-[#e8dfd4]'}`} />
+            ))}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   if (layout === 'carousel') {
     return (
       <div className="relative">
         <button type="button" className="block w-full" onClick={() => open(cur)}>
           <img
-            src={images[cur]}
+            src={images[cur].url}
             alt={`${title} ${cur + 1}`}
             className="w-full max-h-96 object-cover rounded-lg border-2 border-[#e8dfd4] hover:border-[#9e4b2c] transition-colors"
           />
         </button>
+        {images[cur].caption && (
+          <p className="font-mono2 text-xs text-[#6f6156] mt-1.5 px-1">{images[cur].caption}</p>
+        )}
         {images.length > 1 && (
           <>
             <button
@@ -952,10 +1004,10 @@ export function GalleryView({
   }
   return (
     <div className={`grid gap-2 ${images.length === 1 ? 'grid-cols-1' : images.length === 2 ? 'grid-cols-2' : 'grid-cols-3'}`}>
-      {images.map((src, i) => (
+      {images.map((img, i) => (
         <button key={i} type="button" className="block group" onClick={() => open(i)}>
           <img
-            src={src}
+            src={img.url}
             alt={`${title} ${i + 1}`}
             className="w-full aspect-square object-cover rounded-lg border-2 border-[#e8dfd4] group-hover:border-[#9e4b2c] transition-colors"
           />
@@ -1539,14 +1591,15 @@ function BlockFileInput({ block, onPatch }: { block: BlockField; onPatch: (p: Pa
   const isPdf = block.type === 'pdf';
 
   if (!isPdf) {
-    // 圖片＝一組相簿：多圖上傳、輪播/縮圖、逐張刪減
+    // 圖片＝一組相簿：多圖上傳、輪播/縮圖/滿版滑動、逐張刪減與加圖說（Ticket-15）
     // content 相容舊資料；但若內容不是圖片（例如從純文字轉來）就忽略
-    const images = block.images ?? (/^(data:image|https?:)/.test(block.content) && block.content ? [block.content] : []);
+    const rawImages = block.images ?? (/^(data:image|https?:)/.test(block.content) && block.content ? [block.content] : []);
+    const images = normalizeGalleryImages(rawImages);
     const [urlDraft, setUrlDraft] = useState('');
-    const setImages = (imgs: string[]) => onPatch({ images: imgs, content: imgs[0] ?? '' });
+    const setImages = (imgs: GalleryImage[]) => onPatch({ images: imgs, content: imgs[0]?.url ?? '' });
     const addUrl = (url: string) => {
       const u = url.trim();
-      if (u) setImages([...images, u]);
+      if (u) setImages([...images, { url: u }]);
       setUrlDraft('');
     };
     return (
@@ -1567,6 +1620,7 @@ function BlockFileInput({ block, onPatch }: { block: BlockField; onPatch: (p: Pa
               [
                 ['carousel', '輪播'],
                 ['grid', '縮圖'],
+                ['swipe', '滿版滑動'],
               ] as const
             ).map(([v, label]) => (
               <button
@@ -1581,18 +1635,27 @@ function BlockFileInput({ block, onPatch }: { block: BlockField; onPatch: (p: Pa
           </span>
         </div>
         {images.length > 0 && (
-          <div className="flex flex-wrap gap-2">
-            {images.map((src, i) => (
-              <div key={i} className="relative group">
-                <img src={src} alt={`${block.label || '圖片'} ${i + 1}`} className="w-20 h-20 rounded-lg border-2 border-[#e8dfd4] object-cover" />
-                <button
-                  type="button"
-                  aria-label="刪除這張"
-                  className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#a8455e] text-white text-[11px] leading-none flex items-center justify-center opacity-90 hover:opacity-100"
-                  onClick={() => setImages(images.filter((_, j) => j !== i))}
-                >
-                  ×
-                </button>
+          <div className="space-y-2">
+            {images.map((img, i) => (
+              <div key={i} className="flex items-center gap-2">
+                <div className="relative shrink-0">
+                  <img src={img.url} alt={`${block.label || '圖片'} ${i + 1}`} className="w-16 h-16 rounded-lg border-2 border-[#e8dfd4] object-cover" />
+                  <button
+                    type="button"
+                    aria-label="刪除這張"
+                    className="absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full bg-[#a8455e] text-white text-[11px] leading-none flex items-center justify-center opacity-90 hover:opacity-100"
+                    onClick={() => setImages(images.filter((_, j) => j !== i))}
+                  >
+                    ×
+                  </button>
+                </div>
+                <input
+                  className="kg-input !h-9 text-xs flex-1"
+                  value={img.caption ?? ''}
+                  onChange={(e) => setImages(images.map((x, j) => (j === i ? { ...x, caption: e.target.value } : x)))}
+                  placeholder="圖說（選填）"
+                  maxLength={200}
+                />
               </div>
             ))}
           </div>
@@ -1628,8 +1691,8 @@ function BlockFileInput({ block, onPatch }: { block: BlockField; onPatch: (p: Pa
             setBusy(true);
             setErr(null);
             try {
-              const added: string[] = [];
-              for (const f of files) added.push(await readImageFile(f));
+              const added: GalleryImage[] = [];
+              for (const f of files) added.push({ url: await readImageFile(f) });
               setImages([...images, ...added]);
             } catch (ex) {
               setErr(ex instanceof Error ? ex.message : '上傳失敗');

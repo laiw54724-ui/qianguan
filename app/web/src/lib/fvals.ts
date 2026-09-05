@@ -1,5 +1,5 @@
 // 結構化欄位值的解析／序列化（值一律以 JSON 字串儲存，壞資料降級為空陣列）
-import type { ChecklistItem, PaletteColor, RadarDim, TimelineEvent } from './types';
+import type { ChecklistItem, GalleryImage, PaletteColor, RadarDim, TimelineEvent } from './types';
 
 function parseArr<T>(raw: string, guard: (x: unknown) => x is T): T[] {
   try {
@@ -39,8 +39,23 @@ export const paletteVisible = (v: PaletteColor[]): PaletteColor[] => v.filter((c
 export const parseCsv = (raw: string): string[] => raw.split(/[,，]/).map((s) => s.trim()).filter(Boolean);
 export const stringifyCsv = (v: string[]): string => v.filter(Boolean).join(',');
 
+// Ticket-15：相簿一張圖片可能是舊資料的純字串，也可能是新的 { url, caption }——
+// 讀取／編輯端一律先過這個函式統一成同一個形狀，不用為了加圖說就跑一次資料遷移。
+export function normalizeGalleryImages(images: unknown): GalleryImage[] {
+  if (!Array.isArray(images)) return [];
+  const out: GalleryImage[] = [];
+  for (const img of images) {
+    if (typeof img === 'string' && img) out.push({ url: img });
+    else if (img && typeof img === 'object' && typeof (img as GalleryImage).url === 'string' && (img as GalleryImage).url) {
+      const caption = (img as GalleryImage).caption;
+      out.push({ url: (img as GalleryImage).url, caption: typeof caption === 'string' ? caption : undefined });
+    }
+  }
+  return out;
+}
+
 // 判斷欄位／區塊欄位是否有內容（顯示端用來略過空欄位）
-export function fieldHasContent(type: string, content: string, images?: string[]): boolean {
+export function fieldHasContent(type: string, content: string, images?: unknown[]): boolean {
   if (type === 'image') return (images?.length ?? 0) > 0 || /^(data:image|https?:)/.test(content);
   if (type === 'pdf') return /^(data:application\/pdf|https?:)/.test(content);
   switch (type) {
