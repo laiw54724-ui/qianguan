@@ -1846,7 +1846,7 @@ export function QaEditor({
           <div className="flex items-center gap-2">
             <span className="font-huninn text-[#9e4b2c] shrink-0">Q</span>
             <ImeInput
-              className="kg-input !w-auto flex-1"
+              className="kg-input !w-auto flex-1 min-w-0"
               value={item.q}
               onChange={(v) => patch(item.id, { q: v })}
               placeholder="問題"
@@ -1863,7 +1863,7 @@ export function QaEditor({
           <div className="flex items-start gap-2">
             <span className="font-huninn text-[#24697f] shrink-0 mt-2">A</span>
             <ImeTextarea
-              className="kg-textarea flex-1"
+              className="kg-textarea flex-1 min-w-0"
               rows={2}
               value={item.a}
               onChange={(v) => patch(item.id, { a: v })}
@@ -2517,7 +2517,7 @@ export function SingleImageInput({ value, onChange }: { value: string; onChange:
       </div>
       {!value && (
         <div className="flex gap-2">
-          <input className="kg-input font-mono2 text-xs flex-1" placeholder="或貼上圖片網址 https://…" value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <input className="kg-input font-mono2 text-xs flex-1 min-w-0" placeholder="或貼上圖片網址 https://…" value={draft} onChange={(e) => setDraft(e.target.value)} />
           <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm shrink-0" disabled={!draft.trim()} onClick={() => onChange(draft.trim())}>
             加入
           </button>
@@ -2568,7 +2568,7 @@ export function MediaInput({ kind, value, onChange }: { kind: 'audio' | 'video';
         <MediaView kind={kind} value={value} />
       ) : (
         <div className="flex gap-2">
-          <input className="kg-input font-mono2 text-xs flex-1" placeholder={`或貼上${label}網址 https://…`} value={draft} onChange={(e) => setDraft(e.target.value)} />
+          <input className="kg-input font-mono2 text-xs flex-1 min-w-0" placeholder={`或貼上${label}網址 https://…`} value={draft} onChange={(e) => setDraft(e.target.value)} />
           <button type="button" className="kg-pill kg-pill-ghost kg-pill-sm shrink-0" disabled={!draft.trim()} onClick={() => onChange(draft.trim())}>
             加入
           </button>
@@ -3125,7 +3125,7 @@ export function RelationNotes({
       ))}
       <div className="flex gap-2">
         <ImeTextarea
-          className="kg-textarea flex-1"
+          className="kg-textarea flex-1 min-w-0"
           rows={2}
           value={draft}
           onChange={setDraft}

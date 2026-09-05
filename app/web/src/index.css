@@ -344,8 +344,20 @@
       transform: translateY(0);
     }
   }
+  /* fill-mode 只留 backwards，不要 both／forwards（Ticket-02 根因）——
+     動畫播完後若用 forwards／both 撐住 to 的計算值，transform 就算寫的是
+     translateY(0)，瀏覽器實際定住的是內插算出來的單位矩陣 matrix(1,0,0,1,0,0)，
+     不是字面上的 none；只要 transform 不是 none，這個元素就會變成子孫
+     position:fixed 的新包含區塊。.kg-rise 幾乎每個頁面區塊都有掛，底下只要巢狀了
+     FillSheet 這類「應該蓋滿整個畫面」的固定定位彈窗，就會被吃掉，變成卡在頁面
+     正常流裡而不是真正蓋滿螢幕（長文／QA 編輯器空白死機就是這樣來的，實測驗證過）。
+     backwards 保留是因為部分呼叫端有帶 animationDelay（見 Character.tsx 等交錯進場
+     動畫），需要它在動畫真正開始前先套用 from 狀態，否則會有一閃而過的未動畫畫面；
+     它跟這裡要修的 bug 無關，不要一起拿掉。動畫播完後元素自然落回沒有動畫時的
+     原始樣式（opacity:1、transform:none），跟本來 both 撐住的視覺結果完全一樣，
+     沒有畫面差異，只是不再假造出一個永遠存在的 transform。 */
   .kg-rise {
-    animation: kg-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+    animation: kg-rise 0.5s cubic-bezier(0.22, 1, 0.36, 1) backwards;
   }
 
   /* 權杖揭示框 */
